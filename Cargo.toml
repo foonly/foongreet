@@ -2,6 +2,9 @@
 name = "foongreet"
 version = "0.1.0"
 edition = "2024"
+description = "A greetd greeter with a software CRT look, drawn straight to DRM/KMS"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/foonly/foongreet"
 
 [dependencies]
 drm = "0.15.0"

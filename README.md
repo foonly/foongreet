@@ -75,3 +75,12 @@ A missing image or font is handled the same way. To see the details,
 run `foongreet --snapshot /tmp/x.png` against the config.
 
 The command line only has testing flags; see `foongreet --help`.
+
+## License
+
+Copyright (C) 2026 Niklas Schönberg
+
+foongreet is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your
+option) any later version. See [LICENSE](LICENSE).
