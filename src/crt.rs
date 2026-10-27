@@ -3,8 +3,9 @@
 //! The UI draws a low-resolution luminance image. Each frame it goes through
 //! phosphor persistence, glow and noise at low resolution, and is then mapped
 //! onto the output through a precomputed table holding the barrel distortion,
-//! scanline beam profile and vignette. The final intensity is colorized
-//! through a phosphor palette.
+//! scanline beam profile and vignette. Horizontally each output pixel blends
+//! the two nearest low-res pixels, so strokes keep an even width under the
+//! curvature. The final intensity is colorized through a phosphor palette.
 
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -42,22 +43,34 @@ const GLOW: u32 = 170;
 const GLOW_RADIUS: usize = 3;
 /// Dark-tube base level so the glass never reads as pure black.
 const BASE: u32 = 7;
+/// How steeply the horizontal blend goes from one low-res pixel to the
+/// next: 1.0 is plain linear, higher is crisper.
+const SHARPEN: f32 = 2.0;
 /// Barrel curvature applied along each axis.
 const CURVE_X: f32 = 0.035;
 const CURVE_Y: f32 = 0.05;
 
-const OUTSIDE: u32 = u32::MAX;
-const IDX_BITS: u32 = 20;
-const IDX_MASK: u32 = (1 << IDX_BITS) - 1;
+/// Where an output pixel samples the low-res image. Pixels off the tube
+/// have zero weights.
+#[derive(Clone, Copy, Default)]
+struct Sample {
+    /// Left of the two horizontally blended low-res pixels.
+    idx: u32,
+    /// Share of the right-hand pixel, of 256.
+    frac: u8,
+    /// Weight of the sharp image (scanline profile and vignette), of 255.
+    sharp: u8,
+    /// Weight of the glow and base level (vignette only), of 255.
+    glow: u8,
+}
 
 pub struct Crt {
     pub lw: usize,
     pub lh: usize,
     ow: usize,
     oh: usize,
-    /// Per output pixel: low-res index (20 bits), sharp weight (6 bits),
-    /// glow weight (6 bits). `OUTSIDE` for pixels off the tube.
-    map: Vec<u32>,
+    /// One entry per output pixel.
+    map: Vec<Sample>,
     phos: Vec<u16>,
     sharp: Vec<u8>,
     glow: Vec<u8>,
@@ -72,10 +85,7 @@ const TARGET_LINES: usize = 480;
 
 impl Crt {
     pub fn new(ow: usize, oh: usize, phosphor: Phosphor) -> Crt {
-        let mut scale = ((oh as f32 / TARGET_LINES as f32).round() as usize).max(1);
-        while (ow / scale) * (oh / scale) > IDX_MASK as usize {
-            scale += 1;
-        }
+        let scale = ((oh as f32 / TARGET_LINES as f32).round() as usize).max(1);
         let (lw, lh) = (ow / scale, oh / scale);
         let n = lw * lh;
         Crt {
@@ -163,7 +173,7 @@ impl Crt {
             } else {
                 let src = &map[y * ow..][..ow];
                 for (px, &m) in line.iter_mut().zip(src) {
-                    *px = if m == OUTSIDE { 0 } else { pal[shade(m, sharp, glow) as usize] };
+                    *px = pal[shade(m, sharp, glow) as usize];
                 }
             }
         });
@@ -171,21 +181,18 @@ impl Crt {
 }
 
 #[inline]
-fn shade(m: u32, sharp: &[u8], glow: &[u8]) -> u32 {
-    if m == OUTSIDE {
-        return 0;
-    }
-    let idx = (m & IDX_MASK) as usize;
-    let ws = (m >> IDX_BITS) & 63;
-    let wg = m >> (IDX_BITS + 6);
-    let s = sharp[idx] as u32 * ws;
-    let g = (glow[idx] as u32 * GLOW >> 8) * wg;
-    ((s + g + BASE * wg) >> 6).min(255)
+fn shade(m: Sample, sharp: &[u8], glow: &[u8]) -> u32 {
+    let i = m.idx as usize;
+    let f = m.frac as u32;
+    let blend = |buf: &[u8]| (buf[i] as u32 * (256 - f) + buf[i + 1] as u32 * f) >> 8;
+    let s = blend(sharp) * m.sharp as u32;
+    let g = (blend(glow) * GLOW >> 8) * m.glow as u32;
+    ((s + g + BASE * m.glow as u32) / 255).min(255)
 }
 
-fn build_map(ow: usize, oh: usize, lw: usize, lh: usize, scale: usize) -> Vec<u32> {
+fn build_map(ow: usize, oh: usize, lw: usize, lh: usize, scale: usize) -> Vec<Sample> {
     let aspect = ow as f32 / oh as f32;
-    let mut map = vec![OUTSIDE; ow * oh];
+    let mut map = vec![Sample::default(); ow * oh];
     map.par_chunks_mut(ow).enumerate().for_each(|(y, row)| {
         let v = (y as f32 + 0.5) / oh as f32 * 2.0 - 1.0;
         for (x, m) in row.iter_mut().enumerate() {
@@ -219,10 +226,20 @@ fn build_map(ow: usize, oh: usize, lw: usize, lh: usize, scale: usize) -> Vec<u3
             };
             let vig = vig * smoothstep(0.0, 0.006, edge);
 
-            let idx = (ly as usize).min(lh - 1) * lw + (lx as usize).min(lw - 1);
-            let ws = (scan * vig * 63.0).round() as u32;
-            let wg = (vig * 63.0).round() as u32;
-            *m = idx as u32 | ws << IDX_BITS | wg << (IDX_BITS + 6);
+            // Blend between the two low-res pixel centers around lx.
+            let px = (lx - 0.5).clamp(0.0, (lw - 1) as f32);
+            let x0 = (px as usize).min(lw.saturating_sub(2));
+            // Steepened around the midpoint ("sharp bilinear"): crisp inside
+            // a pixel, blended only near its edges.
+            let f = ((px - x0 as f32 - 0.5) * SHARPEN + 0.5).clamp(0.0, 1.0);
+            let frac = (f * 256.0).round().min(255.0) as u8;
+
+            *m = Sample {
+                idx: ((ly as usize).min(lh - 1) * lw + x0) as u32,
+                frac,
+                sharp: (scan * vig * 255.0).round() as u8,
+                glow: (vig * 255.0).round() as u8,
+            };
         }
     });
     map
