@@ -71,6 +71,7 @@ pub struct Ui {
     h: usize,
     start: Instant,
     header: Vec<String>,
+    demo: bool,
 
     user: String,
     secret: String,
@@ -99,8 +100,20 @@ pub struct Ui {
 
 impl Ui {
     /// `user` overrides the remembered user when non-empty.
-    pub fn new(font: Font, bg: Option<Vec<u8>>, w: usize, h: usize, sessions: Vec<Session>, user: String, state: State, power: Power) -> Ui {
-        let user = if user.is_empty() { state.user.clone() } else { user };
+    /// `demo` replaces machine details and the remembered user with made-up
+    /// values, for screenshots.
+    pub fn new(
+        font: Font,
+        bg: Option<Vec<u8>>,
+        w: usize,
+        h: usize,
+        sessions: Vec<Session>,
+        user: String,
+        state: State,
+        power: Power,
+        demo: bool,
+    ) -> Ui {
+        let user = if user.is_empty() && !demo { state.user.clone() } else { user };
         let focus = if user.is_empty() { Field::User } else { Field::Secret };
         let session = sessions.iter().position(|s| s.name == state.session).unwrap_or(0);
         Ui {
@@ -109,7 +122,8 @@ impl Ui {
             w,
             h,
             start: Instant::now(),
-            header: header_lines(),
+            header: header_lines(demo),
+            demo,
             user,
             secret: String::new(),
             focus,
@@ -334,7 +348,7 @@ impl Ui {
             c.text(2 * cw, (1 + i) * ch, &shown, if i == 0 { BRIGHT } else { NORMAL });
         }
 
-        let clock = clock();
+        let clock = if self.demo { "1986-10-27 09:41:00".to_string() } else { clock() };
         c.text((cols.saturating_sub(clock.len() + 2)) * cw, ch, &clock, NORMAL);
 
         // Login box, appears once the header has finished typing.
@@ -476,21 +490,27 @@ impl Canvas<'_> {
     }
 }
 
-fn header_lines() -> Vec<String> {
-    let host = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
-    let mem_kb = std::fs::read_to_string("/proc/meminfo")
-        .ok()
-        .and_then(|m| m.lines().next().and_then(|l| l.split_whitespace().nth(1)).map(str::to_string))
-        .unwrap_or_else(|| "640".into());
-    let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+fn header_lines(demo: bool) -> Vec<String> {
+    let (mem_kb, kernel, host, line) = if demo {
+        ("640".into(), "6.12.0".into(), "MAINFRAME".into(), "TTY1".into())
+    } else {
+        let read = |path| std::fs::read_to_string(path).unwrap_or_default().trim().to_string();
+        let mem_kb = read("/proc/meminfo")
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .unwrap_or("640")
+            .to_string();
+        (mem_kb, read("/proc/sys/kernel/osrelease"), read("/proc/sys/kernel/hostname"), crate::tty::name())
+    };
     vec![
         "FOONGREET TERMINAL SYSTEM  REV 0.1".into(),
-        "(C) 1986-2026 FOON MICROSYSTEMS".into(),
+        "(C) 1986-2026 FOONLY MICROSYSTEMS".into(),
         String::new(),
         format!("MEMORY TEST ... {mem_kb}K OK"),
-        format!("KERNEL ........ {}", kernel.trim().to_uppercase()),
-        format!("NODE .......... {}", host.trim().to_uppercase()),
-        format!("LINE .......... {}", crate::tty::name()),
+        format!("KERNEL ........ {}", kernel.to_uppercase()),
+        format!("NODE .......... {}", host.to_uppercase()),
+        format!("LINE .......... {line}"),
     ]
 }
 

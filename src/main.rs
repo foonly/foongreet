@@ -35,6 +35,8 @@ Settings live in the config file; see config.example.toml.
                    GREETD_SOCK is set; needs the `preview` feature)
   --snapshot FILE  render offscreen at the --preview size (default
                    1920x1080) for ~3s with --mock, then save a PNG
+  --demo           made-up hostname, kernel, memory and clock, and no
+                   remembered user (for screenshots)
 ";
 
 struct Args {
@@ -44,6 +46,7 @@ struct Args {
     dev: bool,
     preview: Option<(usize, usize)>,
     snapshot: Option<PathBuf>,
+    demo: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -54,6 +57,7 @@ fn parse_args() -> Result<Args, String> {
         dev: false,
         preview: None,
         snapshot: None,
+        demo: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -76,6 +80,7 @@ fn parse_args() -> Result<Args, String> {
                 a.snapshot = Some(val()?.into());
                 a.mock = true;
             }
+            "--demo" => a.demo = true,
             "-h" | "--help" => {
                 print!("{USAGE}");
                 std::process::exit(0);
@@ -169,7 +174,7 @@ fn run() -> Result<(), String> {
             .map_err(|e| warnings.push((e, "BACKGROUND NOT LOADED".into())))
             .ok()
     });
-    let mut ui = ui::Ui::new(font, bg, crt.lw, crt.lh, sessions, config.login.default_user.clone(), state, power);
+    let mut ui = ui::Ui::new(font, bg, crt.lw, crt.lh, sessions, config.login.default_user.clone(), state, power, args.demo);
     for (detail, _) in &warnings {
         eprintln!("foongreet: {detail}");
     }

@@ -1,7 +1,11 @@
 # foongreet
 
 A greetd greeter that draws straight to DRM/KMS (or `/dev/fb0`) with a
-software amber-CRT effect. No compositor, no GPU stack.
+software CRT effect in amber or green phosphor. No compositor, no GPU
+stack.
+
+![Amber phosphor](docs/amber.png)
+![Green phosphor](docs/green.png)
 
 ## Build
 
@@ -14,7 +18,13 @@ software amber-CRT effect. No compositor, no GPU stack.
 
        cargo run --release --features preview -- --preview 1600x900
 
-   `--snapshot out.png` renders offscreen instead.
+   `--snapshot out.png` renders offscreen instead; add `--demo` to swap
+   your hostname, kernel, memory and clock for made-up values. The
+   screenshots above are:
+
+       foongreet --snapshot docs/amber.png --preview 1600x900 --config /dev/null --demo
+
+   (and the same with a config containing `phosphor = "green"`).
 
 2. **Spare VT with the real display path**: switch to a free VT
    (Ctrl+Alt+F3), log in, and run:
