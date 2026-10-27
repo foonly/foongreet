@@ -92,11 +92,27 @@ pub fn load(path: &Path) -> (Config, Option<String>) {
 mod tests {
     use super::*;
 
+    const EXAMPLE: &str = include_str!("../config.example.toml");
+
+    /// As shipped, the example is all defaults, so it can be installed as is.
     #[test]
-    fn example_parses() {
-        let config: Config = toml::from_str(include_str!("../config.example.toml")).unwrap();
-        assert_eq!(config.sessions.len(), 1);
+    fn example_is_defaults() {
+        let config: Config = toml::from_str(EXAMPLE).unwrap();
+        assert!(config.sessions.is_empty() && config.display.background.is_none() && config.display.output.is_none());
         assert_eq!(config.power.reboot, "systemctl reboot");
+    }
+
+    /// The commented-out "#key = value" examples must stay valid too.
+    #[test]
+    fn example_with_extras_parses() {
+        let uncommented: String = EXAMPLE
+            .lines()
+            .map(|l| if l.starts_with('#') && !l.starts_with("# ") && l != "#" { &l[1..] } else { l })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&uncommented).unwrap();
+        assert_eq!(config.sessions.len(), 1);
+        assert_eq!(config.display.output.as_deref(), Some("DP-1"));
     }
 
     #[test]

@@ -1,12 +1,12 @@
 # foongreet configuration: /etc/foongreet/config.toml
-# Every setting is optional; the values below are the defaults unless noted.
+# Every setting is optional. Active lines show the defaults; settings
+# without a default are commented out as "#key = value" examples.
 
 [display]
 # Phosphor color: "amber" or "green".
 phosphor = "amber"
 # PNG shown behind the login box, converted to phosphor brightness.
-# No default.
-background = "/etc/foongreet/bg.png"
+#background = "/etc/foongreet/bg.png"
 # Background brightness, 0.0 to 1.0. Keep it low so text stays readable.
 background_dim = 0.35
 # Linux console font (PSF1/PSF2, optionally gzipped).
@@ -14,7 +14,7 @@ font = "/usr/share/kbd/consolefonts/default8x16.psfu.gz"
 # Screen for the login, by connector name as in /sys/class/drm (without
 # the "cardN-" prefix) or `hyprctl monitors`. Other screens show an empty
 # tube. Default: the first connected screen.
-output = "DP-1"
+#output = "DP-1"
 # Draw to /dev/fb0 instead of DRM/KMS. Only one screen; ignores `output`.
 fbdev = false
 
@@ -22,7 +22,7 @@ fbdev = false
 # Preselected user; overrides the remembered one. Empty means none.
 default_user = ""
 # Where the last user and session are remembered. Must be writable by the
-# greeter user: sudo install -d -o greeter -g greeter -m 700 /var/cache/foongreet
+# greeter user; `make install` creates it.
 cache_dir = "/var/cache/foongreet"
 
 [power]
@@ -31,8 +31,8 @@ poweroff = "systemctl poweroff"
 reboot = "systemctl reboot"
 
 # Extra sessions, listed before those found in /usr/share/wayland-sessions.
-# Repeat the block for more. None by default.
-[[session]]
-name = "Sway (software rendering)"
-command = "sway"
-env = ["WLR_RENDERER=pixman", "XDG_SESSION_TYPE=wayland"]
+# Repeat the block for more.
+#[[session]]
+#name = "Sway (software rendering)"
+#command = "sway"
+#env = ["WLR_RENDERER=pixman", "XDG_SESSION_TYPE=wayland"]

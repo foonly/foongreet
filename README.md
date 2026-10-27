@@ -7,24 +7,29 @@ stack.
 ![Amber phosphor](docs/amber.png)
 ![Green phosphor](docs/green.png)
 
-## Build
+## Build and install
 
-    cargo build --release                      # greeter binary
-    cargo build --release --features preview   # + desktop preview window
+    make                 # build as your user
+    sudo make install    # binary, default config, cache directory
+
+`make install` puts the binary in `/usr/local/bin`, installs
+`config.example.toml` as `/etc/foongreet/config.toml` unless one already
+exists, and creates `/var/cache/foongreet` for the `greeter` user.
+`PREFIX`, `DESTDIR` and `GREETER_USER` can be overridden as usual.
+`sudo make uninstall` removes the binary but keeps the config and cache.
+
+Other targets: `make test`, `make preview` (desktop window with a fake
+greetd), `make screenshots` (regenerates the images above).
 
 ## Trying it out
 
 1. **Desktop preview** (fake greetd, password is `password`):
 
-       cargo run --release --features preview -- --preview 1600x900
+       make preview
 
-   `--snapshot out.png` renders offscreen instead; add `--demo` to swap
-   your hostname, kernel, memory and clock for made-up values. The
-   screenshots above are:
-
-       foongreet --snapshot docs/amber.png --preview 1600x900 --config /dev/null --demo
-
-   (and the same with a config containing `phosphor = "green"`).
+   `foongreet --snapshot out.png` renders offscreen instead; add `--demo`
+   to swap your hostname, kernel, memory and clock for made-up values
+   (`make screenshots` uses both).
 
 2. **Spare VT with the real display path**: switch to a free VT
    (Ctrl+Alt+F3), log in, and run:
@@ -42,19 +47,14 @@ stack.
 
    To try settings without touching `/etc`, pass `--config my.toml`.
 
-3. **For real** (`/etc/greetd/config.toml`):
+3. **For real**: after `sudo make install`, set the greeter in
+   `/etc/greetd/config.toml`:
 
        [default_session]
        command = "/usr/local/bin/foongreet"
        user = "greeter"
 
-   Settings go in `/etc/foongreet/config.toml` (see below). To remember
-   the last user and session, create the cache directory for the greeter
-   user once:
-
-       sudo install -d -o greeter -g greeter -m 700 /var/cache/foongreet
-
-   Keep your previous `command` line commented out, and make sure you
+   Settings go in `/etc/foongreet/config.toml` (see below). Keep your previous `command` line commented out, and make sure you
    can still get a root shell on another VT.
 
 ## Configuration
