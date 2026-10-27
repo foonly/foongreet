@@ -114,7 +114,8 @@ impl Crt {
     }
 
     /// Renders `lum` (lw*lh) into `out` (stride in pixels). `t` is seconds
-    /// since start; `collapse` runs 0..1 for the power-off animation.
+    /// since start; `collapse` runs 0..1 for the power-off animation and
+    /// back from 1 to 0 for power-on. At 1 the screen is black.
     pub fn render(&mut self, lum: &[u8], t: f32, collapse: f32, out: &mut [u32], stride: usize) {
         let (lw, lh) = (self.lw, self.lh);
 
@@ -149,6 +150,8 @@ impl Crt {
         let boost = if collapse > 0.0 { (1.0 / (sx * sy).sqrt()).min(3.0) } else { 1.0 };
         let fade = if collapse > 0.9 { (1.0 - collapse) * 10.0 } else { 1.0 };
         let boost = (boost * fade * 256.0) as u32;
+        // The squashed beam glows hot regardless of the picture.
+        let flash = ((1.0 - sy) * 200.0 * fade) as u32;
 
         let (ow, oh) = (self.ow, self.oh);
         let (map, sharp, glow, pal) = (&self.map, &self.sharp, &self.glow, &self.palette);
@@ -166,8 +169,9 @@ impl Crt {
                     *px = if xs < 0.0 || xs >= ow as f32 {
                         0
                     } else {
-                        let v = shade(src[xs as usize], sharp, glow);
-                        pal[((v * boost) >> 8).min(255) as usize]
+                        let m = src[xs as usize];
+                        let v = (shade(m, sharp, glow) * boost >> 8) + (flash * m.glow as u32 / 255);
+                        pal[v.min(255) as usize]
                     };
                 }
             } else {

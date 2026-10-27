@@ -18,6 +18,10 @@ pub trait Output {
         std::thread::sleep(timeout);
         Vec::new()
     }
+    /// Whether frames are actually reaching the display yet.
+    fn shown(&self) -> bool {
+        true
+    }
     /// A setup problem worth showing on screen.
     fn warning(&self) -> Option<String> {
         None

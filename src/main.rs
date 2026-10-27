@@ -20,6 +20,7 @@ use std::{
 
 const FRAME: Duration = Duration::from_millis(33);
 const POWER_OFF: f32 = 0.45;
+const POWER_ON: f32 = 0.6;
 
 const USAGE: &str = "\
 usage: foongreet [options]
@@ -183,6 +184,12 @@ fn run() -> Result<(), String> {
     }
     let mut lum = vec![0u8; crt.lw * crt.lh];
 
+    // Startup: black until frames reach the display plus the warm-up delay,
+    // then the power-on animation, then the UI clock starts.
+    let warmup = if tty.is_some() { config.display.startup_delay.max(0.0) } else { 0.0 };
+    let mut shown_at: Option<Instant> = None;
+    let mut powered_on = false;
+
     let mut next = Instant::now();
     let mut off_at: Option<f32> = None;
     loop {
@@ -201,7 +208,7 @@ fn run() -> Result<(), String> {
         }
 
         if let Some(path) = &args.snapshot {
-            if ui.time() > 3.0 {
+            if powered_on && ui.time() > 3.0 {
                 let (w, h) = out.size();
                 let mut px = vec![0u32; w * h];
                 crt.render(&lum, ui.time(), 0.0, &mut px, w);
@@ -219,12 +226,33 @@ fn run() -> Result<(), String> {
 
         if Instant::now() >= next {
             let t = ui.time();
-            let collapse = off_at.map_or(0.0, |o| ((t - o) / POWER_OFF).min(1.0));
-            if collapse >= 1.0 {
-                break;
+            let collapse = match (off_at, powered_on) {
+                (Some(o), _) => {
+                    let c = ((t - o) / POWER_OFF).min(1.0);
+                    if c >= 1.0 {
+                        break;
+                    }
+                    c
+                }
+                (None, true) => 0.0,
+                (None, false) => {
+                    let since = shown_at.map_or(-1.0, |s| s.elapsed().as_secs_f32() - warmup);
+                    if since >= POWER_ON {
+                        powered_on = true;
+                        ui.restart_clock();
+                        0.0
+                    } else {
+                        1.0 - (since / POWER_ON).clamp(0.0, 1.0)
+                    }
+                }
+            };
+            if powered_on {
+                ui.draw(&mut lum);
             }
-            ui.draw(&mut lum);
             out.present(&mut |buf, stride| crt.render(&lum, t, collapse, buf, stride)).map_err(|e| e.to_string())?;
+            if shown_at.is_none() && out.shown() {
+                shown_at = Some(Instant::now());
+            }
             next += FRAME;
             if next < Instant::now() {
                 next = Instant::now() + FRAME;

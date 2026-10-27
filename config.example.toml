@@ -15,6 +15,10 @@ font = "/usr/share/kbd/consolefonts/default8x16.psfu.gz"
 # the "cardN-" prefix) or `hyprctl monitors`. Other screens show an empty
 # tube. Default: the first connected screen.
 #output = "DP-1"
+# Seconds to stay black before the power-on animation, giving monitors
+# time to sync to the new signal. Raise it if the animation is cut off,
+# lower it if the wait feels long.
+startup_delay = 2.0
 # Draw to /dev/fb0 instead of DRM/KMS. Only one screen; ignores `output`.
 fbdev = false
 

@@ -27,11 +27,14 @@ pub struct Display {
     pub phosphor: crate::crt::Phosphor,
     /// Connector for the login, e.g. "DP-1". Default: first connected.
     pub output: Option<String>,
+    /// Seconds of black after the first frame before powering on, so the
+    /// monitor has synced and the animation is actually seen.
+    pub startup_delay: f32,
 }
 
 impl Default for Display {
     fn default() -> Display {
-        Display { background: None, background_dim: 0.35, font: DEFAULT_FONT.into(), fbdev: false, phosphor: Default::default(), output: None }
+        Display { background: None, background_dim: 0.35, font: DEFAULT_FONT.into(), fbdev: false, phosphor: Default::default(), output: None, startup_delay: 2.0 }
     }
 }
 

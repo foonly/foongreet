@@ -210,6 +210,10 @@ impl Output for Kms {
         Ok(())
     }
 
+    fn shown(&self) -> bool {
+        !self.needs_modeset
+    }
+
     fn warning(&self) -> Option<String> {
         self.warning.clone()
     }

@@ -148,6 +148,12 @@ impl Ui {
         self.set_status(Status::Error(msg.into()));
     }
 
+    /// Restarts animations (the boot header typing out) from the beginning.
+    pub fn restart_clock(&mut self) {
+        self.start = Instant::now();
+        self.status_at = 0.0;
+    }
+
     pub fn time(&self) -> f32 {
         self.start.elapsed().as_secs_f32()
     }
