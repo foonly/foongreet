@@ -82,6 +82,17 @@ pub struct Crt {
 
 /// Low-res target height; the scale factor is picked to land near it.
 const TARGET_LINES: usize = 480;
+/// Render threads. Beyond about four the serial low-res stage dominates,
+/// and extra threads mostly burn CPU spinning while they wait for work:
+/// at 2560x1440 one frame costs ~21 ms of CPU on 4 threads, ~51 ms on 16,
+/// for the same wall time.
+const MAX_THREADS: usize = 4;
+
+/// Sizes the global thread pool `render` uses. Call before rendering.
+pub fn init_threads() {
+    let n = std::thread::available_parallelism().map_or(1, |n| n.get()).min(MAX_THREADS);
+    let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
+}
 
 impl Crt {
     pub fn new(ow: usize, oh: usize, phosphor: Phosphor) -> Crt {

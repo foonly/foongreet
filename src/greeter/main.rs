@@ -123,6 +123,7 @@ fn open_output(args: &Args, display: &config::Display) -> Result<Box<dyn Output>
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     tty::install_signal_handlers();
+    crt::init_threads();
 
     // Problems that should not stop the greeter: logged, and the first one
     // is shown on screen.

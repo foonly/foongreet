@@ -8,6 +8,9 @@ pub const DIM: u8 = 110;
 pub const NORMAL: u8 = 190;
 pub const BRIGHT: u8 = 255;
 
+/// Characters per second the boot header types out at.
+pub const TYPE_RATE: f32 = 90.0;
+
 pub struct Canvas<'a> {
     pub buf: &'a mut [u8],
     pub w: usize,
@@ -64,7 +67,7 @@ impl Canvas<'_> {
     /// the top right. Returns whether the header has finished typing.
     pub fn header(&mut self, lines: &[String], t: f32, demo: bool) -> bool {
         let (cw, ch) = (self.font.width, self.font.height);
-        let mut budget = (t * 90.0) as usize;
+        let mut budget = (t * TYPE_RATE) as usize;
         for (i, line) in lines.iter().enumerate() {
             let n = line.chars().count().min(budget);
             budget -= n;

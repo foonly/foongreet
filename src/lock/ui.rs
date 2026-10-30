@@ -40,6 +40,12 @@ impl Ui {
         self.start.elapsed().as_secs_f32()
     }
 
+    /// Whether the boot header is still typing out.
+    pub fn typing(&self) -> bool {
+        let chars: usize = self.header.iter().map(|l| l.chars().count()).sum();
+        self.time() * canvas::TYPE_RATE <= chars as f32
+    }
+
     /// Draws over `buf`, which holds the background already.
     pub fn draw(&self, buf: &mut [u8], w: usize, h: usize) {
         let t = self.time();

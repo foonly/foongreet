@@ -8,7 +8,7 @@ mod keys;
 mod ui;
 
 use foongreet::{
-    background, config,
+    background, config, crt,
     crt::Crt,
     font::Font,
     key::Key,
@@ -48,6 +48,11 @@ use std::{
 };
 
 const FRAME: Duration = Duration::from_millis(33);
+/// Frame time once nothing is animating and no key was pressed for
+/// `ACTIVE_FOR`: the picture only changes for the blink, the clock and
+/// the CRT's own flicker, and a full-rate CRT costs a good part of a core.
+const IDLE_FRAME: Duration = Duration::from_millis(100);
+const ACTIVE_FOR: Duration = Duration::from_secs(5);
 /// Buffers per screen; with frame callbacks two are normally enough.
 const MAX_BUFFERS: usize = 3;
 
@@ -135,6 +140,7 @@ struct App {
     any_key: bool,
     unlock_after: Option<f32>,
     unlock_at: Option<Instant>,
+    last_key: Instant,
     exit: Option<Result<(), String>>,
 }
 
@@ -152,6 +158,7 @@ fn run() -> Result<(), String> {
         Font::load(config::DEFAULT_FONT.as_ref())
     })?;
 
+    crt::init_threads();
     let conn = Connection::connect_to_env().map_err(|e| format!("wayland: {e}"))?;
     let (globals, mut queue) = registry_queue_init::<App>(&conn).map_err(|e| format!("wayland: {e}"))?;
     let qh = queue.handle();
@@ -181,6 +188,7 @@ fn run() -> Result<(), String> {
         any_key: args.any_key,
         unlock_after: args.unlock_after,
         unlock_at: None,
+        last_key: Instant::now(),
         exit: None,
     };
     // Output names arrive after the first roundtrip; they pick the prompt.
@@ -197,7 +205,7 @@ fn run() -> Result<(), String> {
         .handle()
         .insert_source(Timer::from_duration(FRAME), |_, _, app| {
             app.tick();
-            TimeoutAction::ToDuration(FRAME)
+            TimeoutAction::ToDuration(app.frame_time())
         })
         .map_err(|e| e.to_string())?;
 
@@ -289,6 +297,11 @@ impl App {
         }
     }
 
+    fn frame_time(&self) -> Duration {
+        let animating = !self.tube.is_on() || self.tube.powering_off() || self.ui.typing();
+        if animating || self.last_key.elapsed() < ACTIVE_FOR { FRAME } else { IDLE_FRAME }
+    }
+
     fn draw(&mut self, i: usize) {
         let collapse = self.collapse;
         let t = self.ui.time();
@@ -341,6 +354,7 @@ impl App {
     }
 
     fn key(&mut self, _k: Key) {
+        self.last_key = Instant::now();
         // Test build: any key unlocks once the lock is up and the tube on.
         if self.any_key && self.locked && self.tube.is_on() {
             self.tube.power_off();
