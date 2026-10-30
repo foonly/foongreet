@@ -4,7 +4,7 @@ pub mod kms;
 pub mod preview;
 pub mod snapshot;
 
-use crate::ui::Key;
+use crate::key::Key;
 use std::{io, time::Duration};
 
 pub trait Output {

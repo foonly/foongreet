@@ -1,7 +1,7 @@
 //! Desktop window for tuning the look without switching VTs.
 
 use super::Output;
-use crate::ui::Key;
+use crate::key::Key;
 use minifb::{InputCallback, KeyRepeat, Window, WindowOptions};
 use std::{cell::RefCell, io, rc::Rc, thread, time::Duration};
 

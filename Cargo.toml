@@ -6,6 +6,10 @@ description = "A greetd greeter with a software CRT look, drawn straight to DRM/
 license = "GPL-3.0-or-later"
 repository = "https://github.com/foonly/foongreet"
 
+[[bin]]
+name = "foongreet"
+path = "src/greeter/main.rs"
+
 [dependencies]
 drm = "0.15.0"
 flate2 = "1.1.10"

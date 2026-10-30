@@ -3,7 +3,7 @@
 //! Dropping `Tty` restores the terminal and text mode. A VT left in
 //! KD_GRAPHICS shows nothing, so this also runs on panic and on signals.
 
-use crate::ui::Key;
+use foongreet::key::Key;
 use std::{
     io,
     sync::atomic::{AtomicBool, Ordering},

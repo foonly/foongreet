@@ -1,16 +1,15 @@
 mod auth;
-mod background;
-mod config;
-mod crt;
-mod font;
-mod output;
 mod power;
 mod sessions;
 mod state;
 mod tty;
 mod ui;
 
-use output::Output;
+use foongreet::{
+    background, config, crt, font, output,
+    output::Output,
+    tube::{Frame, Tube},
+};
 use std::{
     path::PathBuf,
     process::ExitCode,
@@ -19,8 +18,6 @@ use std::{
 };
 
 const FRAME: Duration = Duration::from_millis(33);
-const POWER_OFF: f32 = 0.45;
-const POWER_ON: f32 = 0.6;
 
 const USAGE: &str = "\
 usage: foongreet [options]
@@ -186,18 +183,15 @@ fn run() -> Result<(), String> {
 
     // Startup: black until frames reach the display plus the warm-up delay,
     // then the power-on animation, then the UI clock starts.
-    let warmup = if tty.is_some() { config.display.startup_delay.max(0.0) } else { 0.0 };
-    let mut shown_at: Option<Instant> = None;
-    let mut powered_on = false;
+    let mut tube = Tube::new(if tty.is_some() { config.display.startup_delay } else { 0.0 });
 
     let mut next = Instant::now();
-    let mut off_at: Option<f32> = None;
     loop {
         let keys = match &mut tty {
             Some(t) => t.keys(next.saturating_duration_since(Instant::now())),
             None => out.keys(next.saturating_duration_since(Instant::now())),
         };
-        if off_at.is_none() {
+        if !tube.powering_off() {
             for k in keys {
                 ui.key(k, &auth);
             }
@@ -208,7 +202,7 @@ fn run() -> Result<(), String> {
         }
 
         if let Some(path) = &args.snapshot {
-            if powered_on && ui.time() > 3.0 {
+            if tube.is_on() && ui.time() > 3.0 {
                 let (w, h) = out.size();
                 let mut px = vec![0u32; w * h];
                 crt.render(&lum, ui.time(), 0.0, &mut px, w);
@@ -217,41 +211,29 @@ fn run() -> Result<(), String> {
         }
 
         let quit = tty::QUIT.load(Ordering::SeqCst) || !out.is_open() || (ui.interrupted && (args.dev || args.mock));
-        if quit && off_at.is_none() && !ui.done {
+        if quit && !tube.powering_off() && !ui.done {
             break;
         }
-        if ui.done && off_at.is_none() {
-            off_at = Some(ui.time());
+        if ui.done {
+            tube.power_off();
         }
 
         if Instant::now() >= next {
-            let t = ui.time();
-            let collapse = match (off_at, powered_on) {
-                (Some(o), _) => {
-                    let c = ((t - o) / POWER_OFF).min(1.0);
-                    if c >= 1.0 {
-                        break;
-                    }
-                    c
+            let collapse = match tube.frame() {
+                Frame::Collapse(c) => c,
+                Frame::PoweredOn => {
+                    ui.restart_clock();
+                    0.0
                 }
-                (None, true) => 0.0,
-                (None, false) => {
-                    let since = shown_at.map_or(-1.0, |s| s.elapsed().as_secs_f32() - warmup);
-                    if since >= POWER_ON {
-                        powered_on = true;
-                        ui.restart_clock();
-                        0.0
-                    } else {
-                        1.0 - (since / POWER_ON).clamp(0.0, 1.0)
-                    }
-                }
+                Frame::Off => break,
             };
-            if powered_on {
+            let t = ui.time();
+            if tube.is_on() {
                 ui.draw(&mut lum);
             }
             out.present(&mut |buf, stride| crt.render(&lum, t, collapse, buf, stride)).map_err(|e| e.to_string())?;
-            if shown_at.is_none() && out.shown() {
-                shown_at = Some(Instant::now());
+            if out.shown() {
+                tube.shown();
             }
             next += FRAME;
             if next < Instant::now() {

@@ -1,6 +1,6 @@
 //! Session discovery from wayland-sessions desktop entries.
 
-use crate::config;
+use foongreet::config;
 use std::{fs, path::Path};
 
 pub struct Session {
