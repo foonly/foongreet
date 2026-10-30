@@ -76,6 +76,34 @@ run `foongreet --snapshot /tmp/x.png` against the config.
 
 The command line only has testing flags; see `foongreet --help`.
 
+## Screen locker
+
+`foonlock` locks a Wayland session with the same look, through
+ext-session-lock-v1 (Hyprland, sway, niri, river, KWin and others).
+It checks the password with PAM and reads the `[display]` settings from
+the same config file. Build and install it separately; it needs libpam
+and libxkbcommon:
+
+    make lock
+    sudo make install-lock    # binary and /etc/pam.d/foonlock
+
+Then start it from hypridle (`~/.config/hypr/hypridle.conf`):
+
+    general {
+        lock_cmd = pidof foonlock || foonlock
+        before_sleep_cmd = loginctl lock-session
+    }
+
+`foonlock` refuses to start without `/etc/pam.d/foonlock`, as PAM's
+fallback would deny every password and the session could not be
+unlocked. If it ever dies while locked, the compositor keeps the session
+locked; in Hyprland, set `misc:allow_session_lock_restore` so a new
+locker can take over: start `foonlock` again from another VT with
+`WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR` pointing at the session.
+
+To try it out without PAM, `foonlock --mock` takes the password
+`password`, and `--unlock-after SECS` unlocks by itself.
+
 ## License
 
 Copyright (C) 2026 Niklas Schönberg

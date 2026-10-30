@@ -3,6 +3,12 @@
 #   make
 #   sudo make install
 #
+# The screen locker builds and installs separately (it needs libpam and
+# libxkbcommon):
+#
+#   make lock
+#   sudo make install-lock
+#
 # install never builds, so target/ is not left owned by root.
 
 PREFIX       ?= /usr/local
@@ -14,16 +20,21 @@ DESTDIR      ?=
 
 BIN    := target/release/foongreet
 CONFIG := $(DESTDIR)$(SYSCONFDIR)/foongreet/config.toml
+LOCK_BIN := target/release/foonlock
+PAM_FILE := $(DESTDIR)$(SYSCONFDIR)/pam.d/foonlock
 
-.PHONY: all build test preview screenshots install uninstall clean
+.PHONY: all build lock test preview screenshots install install-lock uninstall clean
 
 all: build
 
 build:
 	cargo build --release
 
+lock:
+	cargo build --release --features lock --bin foonlock
+
 test:
-	cargo test --release
+	cargo test --release --features lock
 
 # Desktop window with a fake greetd (password: "password").
 preview:
@@ -57,9 +68,18 @@ install:
 	@echo "In /etc/greetd/config.toml, under [default_session]:"
 	@echo "  command = \"$(BINDIR)/foongreet\""
 
+install-lock:
+	@test -x $(LOCK_BIN) || { echo "$(LOCK_BIN) not found; run 'make lock' as your user first"; exit 1; }
+	install -Dm755 $(LOCK_BIN) $(DESTDIR)$(BINDIR)/foonlock
+	@# Without it PAM falls back to "other" and nothing could unlock.
+	install -Dm644 pam/foonlock $(PAM_FILE)
+	@echo
+	@echo "In ~/.config/hypr/hypridle.conf, under general:"
+	@echo "  lock_cmd = pidof foonlock || $(BINDIR)/foonlock"
+
 # Leaves the config and cache in place.
 uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/foongreet
+	rm -f $(DESTDIR)$(BINDIR)/foongreet $(DESTDIR)$(BINDIR)/foonlock $(PAM_FILE)
 	@echo "kept $(CONFIG) and $(DESTDIR)$(CACHEDIR); remove them by hand if wanted"
 
 clean:

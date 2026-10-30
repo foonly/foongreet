@@ -1,0 +1,4 @@
+#%PAM-1.0
+# PAM configuration for foonlock, installed as /etc/pam.d/foonlock.
+# Same password check as a console login.
+auth       include      login

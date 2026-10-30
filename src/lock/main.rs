@@ -4,6 +4,7 @@
 //! If foonlock dies while locked, the compositor keeps the session locked
 //! (it never falls back to unlocked), so a crash is safe but annoying.
 
+mod auth;
 mod keys;
 mod ui;
 
@@ -63,27 +64,26 @@ Locks the Wayland session (ext-session-lock-v1). Display settings come
 from the foongreet config file; see config.example.toml.
 
   --config FILE       config file (default /etc/foongreet/config.toml)
-  --any-key           TEST BUILD: any key unlocks, no password check.
-                      Required until PAM is in.
+  --mock              no PAM: the password is \"password\"
   --unlock-after SECS unlock by itself after SECS seconds (for testing)
   --demo              made-up hostname, kernel, memory and clock
 ";
 
 struct Args {
     config: PathBuf,
-    any_key: bool,
+    mock: bool,
     unlock_after: Option<f32>,
     demo: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut a = Args { config: config::DEFAULT_PATH.into(), any_key: false, unlock_after: None, demo: false };
+    let mut a = Args { config: config::DEFAULT_PATH.into(), mock: false, unlock_after: None, demo: false };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         let mut val = || it.next().ok_or_else(|| format!("{arg} needs a value"));
         match arg.as_str() {
             "--config" => a.config = val()?.into(),
-            "--any-key" => a.any_key = true,
+            "--mock" => a.mock = true,
             "--unlock-after" => a.unlock_after = Some(val()?.parse().map_err(|_| "--unlock-after: bad number")?),
             "--demo" => a.demo = true,
             "-h" | "--help" => {
@@ -137,7 +137,7 @@ struct App {
     tube: Tube,
     /// Collapse of the last frame, for redraws between ticks.
     collapse: f32,
-    any_key: bool,
+    auth: auth::Auth,
     unlock_after: Option<f32>,
     unlock_at: Option<Instant>,
     last_key: Instant,
@@ -146,8 +146,8 @@ struct App {
 
 fn run() -> Result<(), String> {
     let args = parse_args()?;
-    if !args.any_key {
-        return Err("no password check yet; pass --any-key to try the test build".into());
+    if !args.mock && !auth::SERVICE_FILES.iter().any(|f| std::path::Path::new(f).exists()) {
+        return Err(format!("{} is missing, so no password could unlock; not locking (see README)", auth::SERVICE_FILES[0]));
     }
     let (config, warning) = config::load(&args.config);
     if let Some(w) = warning {
@@ -185,7 +185,7 @@ fn run() -> Result<(), String> {
         // No modeset happens, so no need to wait for monitors to sync.
         tube: Tube::new(0.0),
         collapse: 1.0,
-        any_key: args.any_key,
+        auth: if args.mock { auth::Auth::mock() } else { auth::Auth::pam() },
         unlock_after: args.unlock_after,
         unlock_at: None,
         last_key: Instant::now(),
@@ -281,7 +281,10 @@ impl App {
     }
 
     fn tick(&mut self) {
-        if self.locked && self.unlock_at.is_some_and(|t| Instant::now() >= t) {
+        while let Ok(ev) = self.auth.rx.try_recv() {
+            self.ui.event(ev);
+        }
+        if self.locked && (self.ui.done || self.unlock_at.is_some_and(|t| Instant::now() >= t)) {
             self.tube.power_off();
         }
         self.collapse = match self.tube.frame() {
@@ -353,11 +356,12 @@ impl App {
         s.settled = !s.prompt && collapse == 0.0;
     }
 
-    fn key(&mut self, _k: Key) {
+    fn key(&mut self, k: Key) {
         self.last_key = Instant::now();
-        // Test build: any key unlocks once the lock is up and the tube on.
-        if self.any_key && self.locked && self.tube.is_on() {
-            self.tube.power_off();
+        // Typing ahead during the power-on is fine; the box shows it once
+        // the header is done.
+        if self.locked && !self.tube.powering_off() {
+            self.ui.key(k, &self.auth);
         }
     }
 
