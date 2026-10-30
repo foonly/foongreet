@@ -49,11 +49,10 @@ use std::{
 };
 
 const FRAME: Duration = Duration::from_millis(33);
-/// Frame time once nothing is animating and no key was pressed for
-/// `ACTIVE_FOR`: the picture only changes for the blink, the clock and
-/// the CRT's own flicker, and a full-rate CRT costs a good part of a core.
-const IDLE_FRAME: Duration = Duration::from_millis(100);
-const ACTIVE_FOR: Duration = Duration::from_secs(5);
+/// With no input for this long, the prompt screen goes dormant: no
+/// cursor, the CRT still, and a frame only when the clock ticks. A
+/// full-rate CRT costs a good part of a core.
+const IDLE_AFTER: Duration = Duration::from_secs(25);
 /// Buffers per screen; with frame callbacks two are normally enough.
 const MAX_BUFFERS: usize = 3;
 
@@ -137,10 +136,18 @@ struct App {
     tube: Tube,
     /// Collapse of the last frame, for redraws between ticks.
     collapse: f32,
+    /// UI time when the prompt went dormant.
+    dormant: Option<f32>,
+    /// Time spent dormant, which the rolling bar skips: it was parked off
+    /// screen and carries on from there.
+    bar_offset: f32,
+    /// Unix second of the clock on the last dormant frame.
+    clock_drawn: u64,
     auth: auth::Auth,
     unlock_after: Option<f32>,
     unlock_at: Option<Instant>,
-    last_key: Instant,
+    /// Last key or PAM message; keeps the screen awake.
+    last_input: Instant,
     exit: Option<Result<(), String>>,
 }
 
@@ -188,7 +195,10 @@ fn run() -> Result<(), String> {
         auth: if args.mock { auth::Auth::mock() } else { auth::Auth::pam() },
         unlock_after: args.unlock_after,
         unlock_at: None,
-        last_key: Instant::now(),
+        last_input: Instant::now(),
+        dormant: None,
+        bar_offset: 0.0,
+        clock_drawn: 0,
         exit: None,
     };
     // Output names arrive after the first roundtrip; they pick the prompt.
@@ -205,7 +215,7 @@ fn run() -> Result<(), String> {
         .handle()
         .insert_source(Timer::from_duration(FRAME), |_, _, app| {
             app.tick();
-            TimeoutAction::ToDuration(app.frame_time())
+            TimeoutAction::ToDuration(FRAME)
         })
         .map_err(|e| e.to_string())?;
 
@@ -283,6 +293,7 @@ impl App {
     fn tick(&mut self) {
         while let Ok(ev) = self.auth.rx.try_recv() {
             self.ui.event(ev);
+            self.last_input = Instant::now();
         }
         if self.locked && (self.ui.done || self.unlock_at.is_some_and(|t| Instant::now() >= t)) {
             self.tube.power_off();
@@ -291,28 +302,53 @@ impl App {
             Frame::Collapse(c) => c,
             Frame::PoweredOn => {
                 self.ui.restart_clock();
+                self.bar_offset = 0.0;
                 0.0
             }
             Frame::Off => return self.unlock(),
         };
+        self.update_dormant();
         for i in 0..self.screens.len() {
-            self.draw(i);
+            self.draw(i, false);
         }
     }
 
-    fn frame_time(&self) -> Duration {
-        let animating = !self.tube.is_on() || self.tube.powering_off() || self.ui.typing();
-        if animating || self.last_key.elapsed() < ACTIVE_FOR { FRAME } else { IDLE_FRAME }
+    /// Goes dormant after `IDLE_AFTER` without input, once the rolling bar
+    /// is off screen so it doesn't freeze halfway; wakes on input.
+    fn update_dormant(&mut self) {
+        let t = self.ui.time();
+        let quiet = self.tube.is_on()
+            && !self.tube.powering_off()
+            && !self.ui.typing()
+            && !self.ui.busy()
+            && self.last_input.elapsed() >= IDLE_AFTER;
+        match self.dormant {
+            None if quiet && !crt::bar_visible(t - self.bar_offset) => {
+                self.dormant = Some(t);
+                self.ui.blink = false;
+            }
+            Some(since) if !quiet => {
+                self.bar_offset += t - since;
+                self.dormant = None;
+                self.ui.blink = true;
+            }
+            _ => {}
+        }
     }
 
-    fn draw(&mut self, i: usize) {
+    /// `force` draws even when nothing changed, for configures.
+    fn draw(&mut self, i: usize, force: bool) {
         let collapse = self.collapse;
-        let t = self.ui.time();
+        let t = self.dormant.unwrap_or_else(|| self.ui.time()) - self.bar_offset;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let s = &mut self.screens[i];
         let (Some(crt), Some((w, h))) = (&mut s.crt, s.size) else { return };
-        if s.waiting || (s.settled && collapse == 0.0) {
+        // Dormant, the prompt only changes when the clock ticks.
+        let unchanged = if s.prompt { self.dormant.is_some() && now == self.clock_drawn } else { s.settled && collapse == 0.0 };
+        if s.waiting || (unchanged && !force) {
             return;
         }
+        crt.still = !s.prompt || self.dormant.is_some();
         let (pw, ph) = (w as i32 * s.scale, h as i32 * s.scale);
 
         let idx = match s.buffers.iter().position(|b| b.canvas(&mut self.pool).is_some()) {
@@ -353,11 +389,14 @@ impl App {
         }
         surface.commit();
         s.waiting = true;
+        if s.prompt {
+            self.clock_drawn = now;
+        }
         s.settled = !s.prompt && collapse == 0.0;
     }
 
     fn key(&mut self, k: Key) {
-        self.last_key = Instant::now();
+        self.last_input = Instant::now();
         // Typing ahead during the power-on is fine; the box shows it once
         // the header is done.
         if self.locked && !self.tube.powering_off() {
@@ -420,7 +459,7 @@ impl SessionLockHandler for App {
         // Every configure needs a buffer committed in response.
         self.screens[i].waiting = false;
         self.screens[i].settled = false;
-        self.draw(i);
+        self.draw(i, true);
     }
 }
 
@@ -432,7 +471,7 @@ impl CompositorHandler for App {
             surface.set_buffer_scale(factor);
             self.resize(i);
             self.screens[i].waiting = false;
-            self.draw(i);
+            self.draw(i, true);
         }
     }
 

@@ -48,6 +48,8 @@ pub struct Ui {
     status: Status,
     status_at: f32,
 
+    /// Whether the cursor blinks; off, it is hidden and the box static.
+    pub blink: bool,
     /// Password accepted: unlock.
     pub done: bool,
 }
@@ -67,6 +69,7 @@ impl Ui {
             cancelled: false,
             status: Status::Ready,
             status_at: 0.0,
+            blink: true,
             done: false,
         }
     }
@@ -90,6 +93,13 @@ impl Ui {
     pub fn typing(&self) -> bool {
         let chars: usize = self.header.iter().map(|l| l.chars().count()).sum();
         self.time() * canvas::TYPE_RATE <= chars as f32
+    }
+
+    /// Whether something on screen is animating: the dots while PAM works
+    /// or a fresh error flashing.
+    pub fn busy(&self) -> bool {
+        let flashing = matches!(self.status, Status::Error(_)) && self.time() - self.status_at < 1.5;
+        !matches!(self.phase, Phase::Idle | Phase::Prompt) || flashing
     }
 
     fn set_status(&mut self, s: Status) {
@@ -205,7 +215,7 @@ impl Ui {
         }
         c.text((bc + 4) * cw, row, &dots(label), if input { BRIGHT } else { DIM });
         c.text(value_col * cw, row, &shown, if input { BRIGHT } else { NORMAL });
-        if input && (t * 2.0) as u32 % 2 == 0 {
+        if input && self.blink && (t * 2.0) as u32 % 2 == 0 {
             c.fill((value_col + shown.chars().count()) * cw, row, cw, ch, BRIGHT);
         }
 

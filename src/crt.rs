@@ -9,6 +9,7 @@
 
 use rayon::prelude::*;
 use serde::Deserialize;
+use std::time::Instant;
 
 #[derive(Deserialize, Clone, Copy, Default, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -30,7 +31,7 @@ impl Phosphor {
         }
     }
 
-    /// Persistence: fraction of the previous frame kept (of 256).
+    /// Persistence: fraction kept per `DECAY_FRAME` (of 256).
     fn decay(self) -> u32 {
         match self {
             Phosphor::Amber => 200,
@@ -78,7 +79,16 @@ pub struct Crt {
     palette: [u32; 256],
     decay: u32,
     rng: u32,
+    /// When the last frame was rendered, for the afterglow.
+    last: Option<Instant>,
+    /// Freezes flicker and noise and hides the rolling bar, so frames only
+    /// differ where `lum` does.
+    pub still: bool,
 }
+
+/// The phosphor decay rate is given per this many seconds; frames further
+/// apart fade further, so the afterglow lasts as long at any frame rate.
+const DECAY_FRAME: f32 = 1.0 / 30.0;
 
 /// Low-res target height; the scale factor is picked to land near it.
 const TARGET_LINES: usize = 480;
@@ -87,6 +97,21 @@ const TARGET_LINES: usize = 480;
 /// at 2560x1440 one frame costs ~21 ms of CPU on 4 threads, ~51 ms on 16,
 /// for the same wall time.
 const MAX_THREADS: usize = 4;
+
+/// Rolling bar height, as a fraction of the screen.
+const BAR_HEIGHT: f32 = 0.08;
+
+/// Rolling bar center at time `t`, as a fraction of the screen height
+/// (0 = top). It spends part of each cycle off screen.
+fn bar_pos(t: f32) -> f32 {
+    (t * 0.07).fract() * 1.4 - 0.2
+}
+
+/// Whether the rolling bar shows on screen at time `t`.
+pub fn bar_visible(t: f32) -> bool {
+    let y = bar_pos(t);
+    y > -BAR_HEIGHT && y < 1.0 + BAR_HEIGHT
+}
 
 /// Sizes the global thread pool `render` uses. Call before rendering.
 pub fn init_threads() {
@@ -112,6 +137,8 @@ impl Crt {
             palette: palette(phosphor),
             decay: phosphor.decay(),
             rng: 0x9e3779b9,
+            last: None,
+            still: false,
         }
     }
 
@@ -130,19 +157,22 @@ impl Crt {
     pub fn render(&mut self, lum: &[u8], t: f32, collapse: f32, out: &mut [u32], stride: usize) {
         let (lw, lh) = (self.lw, self.lh);
 
-        // Flicker and a slow rolling bright bar.
-        let flicker = 244 + (self.rand() % 12);
-        let bar_y = ((t * 0.07).fract() * 1.4 - 0.2) * lh as f32;
-        let bar_h = lh as f32 * 0.08;
+        let dt = self.last.map_or(DECAY_FRAME, |l| l.elapsed().as_secs_f32());
+        self.last = Some(Instant::now());
+        let decay = ((self.decay as f32 / 256.0).powf(dt / DECAY_FRAME) * 256.0) as u32;
 
-        let mut seed = self.rand() | 1;
+        // Flicker and a slow rolling bright bar.
+        let (flicker, mut seed) = if self.still { (250, 0x2545_f491) } else { (244 + (self.rand() % 12), self.rand() | 1) };
+        let bar_y = if self.still { -1.0 } else { bar_pos(t) } * lh as f32;
+        let bar_h = lh as f32 * BAR_HEIGHT;
+
         for y in 0..lh {
             let d = (y as f32 - bar_y) / bar_h;
             let bar = if d.abs() < 1.0 { ((1.0 - d * d) * 6.0) as u32 } else { 0 };
             let row = y * lw;
             for i in row..row + lw {
                 let v = (lum[i] as u32) << 8;
-                let p = (self.phos[i] as u32 * self.decay) >> 8;
+                let p = (self.phos[i] as u32 * decay) >> 8;
                 let p = v.max(p);
                 self.phos[i] = p as u16;
                 seed ^= seed << 13;
