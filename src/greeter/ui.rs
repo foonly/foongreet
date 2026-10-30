@@ -75,6 +75,8 @@ pub struct Ui {
     /// Power command running; the system should be going down.
     halting: Option<Action>,
 
+    /// Whether the cursor blinks; off, it is hidden and the box static.
+    pub blink: bool,
     /// Session started; the greeter should exit.
     pub done: bool,
     /// Ctrl-C pressed (only honored in mock mode by the caller).
@@ -121,6 +123,7 @@ impl Ui {
             power,
             confirm: None,
             halting: None,
+            blink: true,
             done: false,
             interrupted: false,
         }
@@ -139,6 +142,18 @@ impl Ui {
 
     pub fn time(&self) -> f32 {
         self.start.elapsed().as_secs_f32()
+    }
+
+    /// Whether the boot header is still typing out.
+    pub fn typing(&self) -> bool {
+        canvas::typing(&self.header, self.time())
+    }
+
+    /// Whether something on screen is animating: the dots while greetd or
+    /// a power command works, or a fresh error flashing.
+    pub fn busy(&self) -> bool {
+        let flashing = matches!(self.status, Status::Error(_)) && self.time() - self.status_at < 1.5;
+        !matches!(self.phase, Phase::Idle | Phase::Prompt) || self.halting.is_some() || flashing
     }
 
     fn set_status(&mut self, s: Status) {
@@ -338,7 +353,7 @@ impl Ui {
         c.fill(x0 - cw, y0 - ch / 2, (BOX_COLS + 2) * cw, BOX_ROWS * ch + ch, 0);
         c.frame(bc, br, BOX_COLS, BOX_ROWS, " SYSTEM LOGIN ", NORMAL);
 
-        let blink = (t * 2.0) as u32 % 2 == 0;
+        let blink = self.blink && (t * 2.0) as u32 % 2 == 0;
         let input = matches!(self.phase, Phase::Idle | Phase::Prompt);
         let value_col = bc + 4 + LABEL_COLS;
         let value_cols = BOX_COLS - 6 - LABEL_COLS;

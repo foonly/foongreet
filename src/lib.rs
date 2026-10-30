@@ -6,6 +6,7 @@ pub mod canvas;
 pub mod config;
 pub mod crt;
 pub mod font;
+pub mod idle;
 pub mod key;
 pub mod output;
 pub mod tube;

@@ -45,7 +45,28 @@ impl Output for Preview {
         self.window
             .update_with_buffer(&self.buf, self.width, self.height)
             .map_err(|e| io::Error::other(e.to_string()))?;
+        self.collect_keys();
+        Ok(())
+    }
 
+    fn keys(&mut self, timeout: Duration) -> Vec<Key> {
+        // Frames can be a second apart when the greeter is dormant, so
+        // handle window events here too.
+        self.window.update();
+        self.collect_keys();
+        if self.keys.is_empty() {
+            thread::sleep(timeout);
+        }
+        std::mem::take(&mut self.keys)
+    }
+
+    fn is_open(&self) -> bool {
+        self.window.is_open()
+    }
+}
+
+impl Preview {
+    fn collect_keys(&mut self) {
         use minifb::Key as K;
         let shift = self.window.is_key_down(K::LeftShift) || self.window.is_key_down(K::RightShift);
         for k in self.window.get_keys_pressed(KeyRepeat::Yes) {
@@ -65,17 +86,5 @@ impl Output for Preview {
             });
         }
         self.keys.extend(self.chars.borrow_mut().drain(..).map(Key::Char));
-        Ok(())
-    }
-
-    fn keys(&mut self, timeout: Duration) -> Vec<Key> {
-        if self.keys.is_empty() {
-            thread::sleep(timeout);
-        }
-        std::mem::take(&mut self.keys)
-    }
-
-    fn is_open(&self) -> bool {
-        self.window.is_open()
     }
 }

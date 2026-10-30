@@ -82,6 +82,12 @@ impl Canvas<'_> {
     }
 }
 
+/// Whether the boot header is still typing out at time `t`.
+pub fn typing(lines: &[String], t: f32) -> bool {
+    let chars: usize = lines.iter().map(|l| l.chars().count()).sum();
+    t * TYPE_RATE <= chars as f32
+}
+
 /// Boot header lines. `line` names where we run, e.g. "TTY1".
 pub fn header_lines(demo: bool, line: &str) -> Vec<String> {
     let (mem_kb, kernel, host, line) = if demo {

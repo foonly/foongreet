@@ -6,7 +6,9 @@ mod tty;
 mod ui;
 
 use foongreet::{
-    background, config, crt, font, output,
+    background, config, crt, font,
+    idle::Idle,
+    output,
     output::Output,
     tube::{Frame, Tube},
 };
@@ -185,6 +187,8 @@ fn run() -> Result<(), String> {
     // Startup: black until frames reach the display plus the warm-up delay,
     // then the power-on animation, then the UI clock starts.
     let mut tube = Tube::new(if tty.is_some() { config.display.startup_delay } else { 0.0 });
+    // Keys and greetd messages keep the screen awake.
+    let mut idle = Idle::default();
 
     let mut next = Instant::now();
     loop {
@@ -195,10 +199,12 @@ fn run() -> Result<(), String> {
         if !tube.powering_off() {
             for k in keys {
                 ui.key(k, &auth);
+                idle.input();
             }
             ui.tick();
             while let Ok(resp) = auth.rx.try_recv() {
                 ui.response(resp, &auth);
+                idle.input();
             }
         }
 
@@ -224,17 +230,27 @@ fn run() -> Result<(), String> {
                 Frame::Collapse(c) => c,
                 Frame::PoweredOn => {
                     ui.restart_clock();
+                    idle.restart();
                     0.0
                 }
                 Frame::Off => break,
             };
-            let t = ui.time();
-            if tube.is_on() {
-                ui.draw(&mut lum);
+            let busy = !tube.is_on() || tube.powering_off() || ui.typing() || ui.busy();
+            if let Some(dormant) = idle.update(ui.time(), busy) {
+                ui.blink = !dormant;
+                crt.still = dormant;
             }
-            out.present(&mut |buf, stride| crt.render(&lum, t, collapse, buf, stride)).map_err(|e| e.to_string())?;
-            if out.shown() {
-                tube.shown();
+            // Dormant, a frame is only due when the clock ticks.
+            if let Some(second) = idle.due() {
+                let t = idle.crt_time(ui.time());
+                if tube.is_on() {
+                    ui.draw(&mut lum);
+                }
+                out.present(&mut |buf, stride| crt.render(&lum, t, collapse, buf, stride)).map_err(|e| e.to_string())?;
+                idle.drawn(second);
+                if out.shown() {
+                    tube.shown();
+                }
             }
             next += FRAME;
             if next < Instant::now() {

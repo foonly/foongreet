@@ -91,8 +91,7 @@ impl Ui {
 
     /// Whether the boot header is still typing out.
     pub fn typing(&self) -> bool {
-        let chars: usize = self.header.iter().map(|l| l.chars().count()).sum();
-        self.time() * canvas::TYPE_RATE <= chars as f32
+        canvas::typing(&self.header, self.time())
     }
 
     /// Whether something on screen is animating: the dots while PAM works
