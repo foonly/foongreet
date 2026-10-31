@@ -34,6 +34,15 @@ impl Tube {
         self.shown_at.get_or_insert_with(Instant::now);
     }
 
+    /// Back to black and through the power-on again, as when first shown
+    /// (after a suspend, say). Does nothing while powering off.
+    pub fn restart(&mut self) {
+        if self.off_at.is_none() {
+            self.on = false;
+            self.shown_at = None;
+        }
+    }
+
     /// Starts powering off; later calls do nothing.
     pub fn power_off(&mut self) {
         self.off_at.get_or_insert_with(Instant::now);

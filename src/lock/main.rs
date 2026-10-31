@@ -6,12 +6,14 @@
 
 mod auth;
 mod keys;
+mod logind;
 mod ui;
 
 use foongreet::{
     background, config, crt,
     crt::Crt,
     idle::Idle,
+    suspend::SuspendWatch,
     font::Font,
     key::Key,
     tube::{Frame, Tube},
@@ -21,7 +23,8 @@ use smithay_client_toolkit::{
     output::{OutputHandler, OutputState},
     reexports::{
         calloop::{
-            EventLoop, LoopHandle,
+            EventLoop, Interest, LoopHandle, Mode, PostAction,
+            generic::{FdWrapper, Generic},
             timer::{TimeoutAction, Timer},
         },
         calloop_wayland_source::WaylandSource,
@@ -50,6 +53,13 @@ use std::{
 };
 
 const FRAME: Duration = Duration::from_millis(33);
+/// Seconds of black before the power-on. Locking for a suspend (lid
+/// closed) is followed by the suspend right away; the screen then keeps
+/// its last frame until resume, and this makes that frame black rather
+/// than the start of the animation.
+const WARMUP: f32 = 1.0;
+/// How long to hold up a suspend for the screens to show black.
+const SLEEP_TIMEOUT: Duration = Duration::from_millis(500);
 /// Buffers per screen; with frame callbacks two are normally enough.
 const MAX_BUFFERS: usize = 3;
 
@@ -110,6 +120,10 @@ struct Screen {
     settled: bool,
     /// Shows the lock box; the others show an empty tube.
     prompt: bool,
+    /// The last frame committed was black.
+    black: bool,
+    /// A black frame reached the screen since the last suspend signal.
+    black_shown: bool,
 }
 
 struct App {
@@ -131,6 +145,13 @@ struct App {
     display: config::Display,
     ui: ui::Ui,
     tube: Tube,
+    /// After a suspend the tube powers on again.
+    suspend: SuspendWatch,
+    /// Blanks the screens before a suspend; None without logind.
+    logind: Option<logind::Logind>,
+    /// When logind announced a suspend we are holding up until the
+    /// screens show black.
+    sleep_at: Option<Instant>,
     /// Collapse of the last frame, for redraws between ticks.
     collapse: f32,
     /// Keys and PAM messages keep the prompt awake.
@@ -179,8 +200,10 @@ fn run() -> Result<(), String> {
         screens: Vec::new(),
         display: config.display,
         ui: ui::Ui::new(font, user_name(), "", args.demo),
-        // No modeset happens, so no need to wait for monitors to sync.
-        tube: Tube::new(0.0),
+        tube: Tube::new(WARMUP),
+        suspend: SuspendWatch::default(),
+        logind: None,
+        sleep_at: None,
         collapse: 1.0,
         auth: if args.mock { auth::Auth::mock() } else { auth::Auth::pam() },
         unlock_after: args.unlock_after,
@@ -198,6 +221,22 @@ fn run() -> Result<(), String> {
     app.pick_prompt();
 
     WaylandSource::new(conn, queue).insert(event_loop.handle()).map_err(|e| e.to_string())?;
+    match logind::Logind::connect() {
+        Ok(logind) => {
+            // SAFETY: the fd belongs to the bus, which lives in `app` for
+            // as long as the event loop.
+            let fd = unsafe { FdWrapper::new(logind.fd()) };
+            event_loop
+                .handle()
+                .insert_source(Generic::new(fd, Interest::READ, Mode::Level), |_, _, app| {
+                    app.logind_events();
+                    Ok(PostAction::Continue)
+                })
+                .map_err(|e| e.to_string())?;
+            app.logind = Some(logind);
+        }
+        Err(e) => eprintln!("foonlock: logind: {e}; the screen is not blanked before a suspend"),
+    }
     event_loop
         .handle()
         .insert_source(Timer::from_duration(FRAME), |_, _, app| {
@@ -230,6 +269,8 @@ impl App {
             waiting: false,
             settled: false,
             prompt: false,
+            black: false,
+            black_shown: false,
         });
     }
 
@@ -278,6 +319,23 @@ impl App {
     }
 
     fn tick(&mut self) {
+        // Without logind (or if its signal came late), this still powers
+        // on again after a resume.
+        if self.suspend.resumed() {
+            self.tube.restart();
+            self.idle.input();
+        }
+        // Let the suspend go ahead once every screen shows black. Screens
+        // that are off never confirm, hence the timeout; logind itself
+        // gives up waiting after a few seconds.
+        if let Some(at) = self.sleep_at
+            && (self.screens.iter().all(|s| s.black_shown) || at.elapsed() >= SLEEP_TIMEOUT)
+        {
+            self.sleep_at = None;
+            if let Some(logind) = &mut self.logind {
+                logind.release();
+            }
+        }
         while let Ok(ev) = self.auth.rx.try_recv() {
             self.ui.event(ev);
             self.idle.input();
@@ -361,6 +419,29 @@ impl App {
             self.idle.drawn(second);
         }
         s.settled = !s.prompt && collapse == 0.0;
+        s.black = collapse >= 1.0;
+    }
+
+    fn logind_events(&mut self) {
+        let Some(logind) = &self.logind else { return };
+        for sleeping in logind.events() {
+            // Back to black: before a suspend so that is what the screen
+            // keeps, and after it for a fresh power-on.
+            self.tube.restart();
+            self.idle.input();
+            if sleeping {
+                self.sleep_at = Some(Instant::now());
+                for s in &mut self.screens {
+                    s.black_shown = false;
+                }
+            } else if let Some(logind) = &mut self.logind {
+                self.sleep_at = None;
+                logind.inhibit();
+            }
+        }
+        if self.sleep_at.is_some() {
+            self.tick();
+        }
     }
 
     fn key(&mut self, k: Key) {
@@ -447,7 +528,9 @@ impl CompositorHandler for App {
 
     fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, _: u32) {
         if let Some(i) = self.screen_index(surface) {
-            self.screens[i].waiting = false;
+            let s = &mut self.screens[i];
+            s.waiting = false;
+            s.black_shown |= s.black;
             self.tube.shown();
         }
     }

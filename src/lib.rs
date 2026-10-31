@@ -9,4 +9,5 @@ pub mod font;
 pub mod idle;
 pub mod key;
 pub mod output;
+pub mod suspend;
 pub mod tube;
