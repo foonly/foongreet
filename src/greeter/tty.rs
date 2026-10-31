@@ -1,7 +1,12 @@
-//! The VT the greeter runs on: raw keyboard input and graphics mode.
+//! The VT the greeter runs on: raw keyboard input, graphics mode, and
+//! switching to other VTs.
 //!
 //! Dropping `Tty` restores the terminal and text mode. A VT left in
 //! KD_GRAPHICS shows nothing, so this also runs on panic and on signals.
+//!
+//! The kernel ignores VT switches (Alt+Fn) away from a VT in KD_GRAPHICS
+//! unless its process handles them: in VT_PROCESS mode it signals us to
+//! release the display first, and again when we are switched back to.
 
 use foongreet::key::Key;
 use std::{
@@ -13,11 +18,44 @@ use std::{
 const KDSETMODE: libc::c_ulong = 0x4B3A;
 const KD_TEXT: libc::c_int = 0;
 const KD_GRAPHICS: libc::c_int = 1;
+const VT_SETMODE: libc::c_ulong = 0x5602;
+const VT_RELDISP: libc::c_ulong = 0x5605;
+const VT_AUTO: libc::c_char = 0;
+const VT_PROCESS: libc::c_char = 1;
+const VT_ACKACQ: libc::c_int = 2;
+
+/// struct vt_mode from <linux/vt.h>.
+#[repr(C)]
+struct VtMode {
+    mode: libc::c_char,
+    waitv: libc::c_char,
+    relsig: libc::c_short,
+    acqsig: libc::c_short,
+    frsig: libc::c_short,
+}
 
 pub static QUIT: AtomicBool = AtomicBool::new(false);
+static RELEASE: AtomicBool = AtomicBool::new(false);
+static ACQUIRE: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_signal(_: libc::c_int) {
     QUIT.store(true, Ordering::SeqCst);
+}
+
+extern "C" fn on_release(_: libc::c_int) {
+    RELEASE.store(true, Ordering::SeqCst);
+}
+
+extern "C" fn on_acquire(_: libc::c_int) {
+    ACQUIRE.store(true, Ordering::SeqCst);
+}
+
+/// A VT switch the main loop has to act on.
+pub enum Switch {
+    /// Switching to another VT: release the display, then `allow_away`.
+    Away,
+    /// Back on our VT: `allow_back`, then take the display again.
+    Back,
 }
 
 pub fn install_signal_handlers() {
@@ -29,6 +67,8 @@ pub fn install_signal_handlers() {
 pub struct Tty {
     orig: libc::termios,
     graphics: bool,
+    /// VT switches are handled (VT_PROCESS mode).
+    switching: bool,
     pending: Vec<u8>,
 }
 
@@ -44,13 +84,51 @@ impl Tty {
         if unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) } != 0 {
             return Err(io::Error::last_os_error());
         }
-        let tty = Tty { orig, graphics, pending: Vec::new() };
+        let mut tty = Tty { orig, graphics, switching: false, pending: Vec::new() };
         if graphics && unsafe { libc::ioctl(0, KDSETMODE, KD_GRAPHICS) } != 0 {
             let err = io::Error::last_os_error();
             drop(tty);
             return Err(io::Error::new(err.kind(), format!("KDSETMODE (is stdin a VT?): {err}")));
         }
+        if graphics {
+            unsafe {
+                libc::signal(libc::SIGUSR1, on_release as *const () as libc::sighandler_t);
+                libc::signal(libc::SIGUSR2, on_acquire as *const () as libc::sighandler_t);
+            }
+            let mode = VtMode {
+                mode: VT_PROCESS,
+                waitv: 0,
+                relsig: libc::SIGUSR1 as libc::c_short,
+                acqsig: libc::SIGUSR2 as libc::c_short,
+                frsig: 0,
+            };
+            tty.switching = unsafe { libc::ioctl(0, VT_SETMODE, &mode) } == 0;
+            if !tty.switching {
+                eprintln!("foongreet: VT_SETMODE: {}; switching VTs will not work", io::Error::last_os_error());
+            }
+        }
         Ok(tty)
+    }
+
+    /// A pending VT switch, if any.
+    pub fn switch(&self) -> Option<Switch> {
+        if RELEASE.swap(false, Ordering::SeqCst) {
+            Some(Switch::Away)
+        } else if ACQUIRE.swap(false, Ordering::SeqCst) {
+            Some(Switch::Back)
+        } else {
+            None
+        }
+    }
+
+    /// Lets the switch away go ahead, once the display is released.
+    pub fn allow_away(&self) {
+        unsafe { libc::ioctl(0, VT_RELDISP, 1) };
+    }
+
+    /// Acknowledges being switched back to.
+    pub fn allow_back(&self) {
+        unsafe { libc::ioctl(0, VT_RELDISP, VT_ACKACQ) };
     }
 
     /// Waits up to `timeout` for input and returns decoded keys.
@@ -75,6 +153,10 @@ impl Tty {
 impl Drop for Tty {
     fn drop(&mut self) {
         unsafe {
+            if self.switching {
+                let mode = VtMode { mode: VT_AUTO, waitv: 0, relsig: 0, acqsig: 0, frsig: 0 };
+                libc::ioctl(0, VT_SETMODE, &mode);
+            }
             if self.graphics {
                 libc::ioctl(0, KDSETMODE, KD_TEXT);
             }

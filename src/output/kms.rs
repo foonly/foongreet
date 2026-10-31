@@ -217,6 +217,17 @@ impl Output for Kms {
     fn warning(&self) -> Option<String> {
         self.warning.clone()
     }
+
+    fn release(&mut self) {
+        self.wait_flip();
+        let _ = self.card.release_master_lock();
+    }
+
+    fn acquire(&mut self) {
+        // Fails only if someone else is master; the modeset retries.
+        let _ = self.card.acquire_master_lock();
+        self.needs_modeset = true;
+    }
 }
 
 impl Drop for Kms {

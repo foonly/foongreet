@@ -190,11 +190,33 @@ fn run() -> Result<(), String> {
     // Keys and greetd messages keep the screen awake.
     let mut idle = Idle::default();
 
+    // On another VT: nothing is drawn (fbdev would draw over its console).
+    let mut away = false;
+
     let mut next = Instant::now();
     loop {
+        if let Some(t) = &tty {
+            match t.switch() {
+                Some(tty::Switch::Away) => {
+                    out.release();
+                    t.allow_away();
+                    away = true;
+                }
+                Some(tty::Switch::Back) => {
+                    t.allow_back();
+                    out.acquire();
+                    away = false;
+                    idle.input();
+                    next = Instant::now();
+                }
+                None => {}
+            }
+        }
+        // Away, only VT signals matter; they interrupt the wait.
+        let wait = if away { FRAME } else { next.saturating_duration_since(Instant::now()) };
         let keys = match &mut tty {
-            Some(t) => t.keys(next.saturating_duration_since(Instant::now())),
-            None => out.keys(next.saturating_duration_since(Instant::now())),
+            Some(t) => t.keys(wait),
+            None => out.keys(wait),
         };
         if !tube.powering_off() {
             for k in keys {
@@ -222,10 +244,14 @@ fn run() -> Result<(), String> {
             break;
         }
         if ui.done {
+            // Away, there is no one to show the power-off to.
+            if away {
+                break;
+            }
             tube.power_off();
         }
 
-        if Instant::now() >= next {
+        if !away && Instant::now() >= next {
             let collapse = match tube.frame() {
                 Frame::Collapse(c) => c,
                 Frame::PoweredOn => {

@@ -29,4 +29,8 @@ pub trait Output {
     fn is_open(&self) -> bool {
         true
     }
+    /// Gives up the display while another VT is shown.
+    fn release(&mut self) {}
+    /// Takes the display back after `release`.
+    fn acquire(&mut self) {}
 }
