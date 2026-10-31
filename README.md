@@ -81,8 +81,8 @@ The command line only has testing flags; see `foongreet --help`.
 `foonlock` locks a Wayland session with the same look, through
 ext-session-lock-v1 (Hyprland, sway, niri, river, KWin and others).
 It checks the password with PAM and reads the `[display]` settings from
-the same config file. Build and install it separately; it needs libpam
-and libxkbcommon:
+the same config file. Build and install it separately; it needs libpam,
+libxkbcommon and libsystemd:
 
     make lock
     sudo make install-lock    # binary and /etc/pam.d/foonlock
@@ -92,7 +92,11 @@ Then start it from hypridle (`~/.config/hypr/hypridle.conf`):
     general {
         lock_cmd = pidof foonlock || foonlock
         before_sleep_cmd = loginctl lock-session
+        inhibit_sleep = 3
     }
+
+`inhibit_sleep = 3` makes hypridle hold off a suspend until the session
+is actually locked (it disables `on_lock_cmd` and `on_unlock_cmd`).
 
 `foonlock` refuses to start without `/etc/pam.d/foonlock`, as PAM's
 fallback would deny every password and the session could not be
@@ -103,6 +107,36 @@ locker can take over: start `foonlock` again from another VT with
 
 To try it out without PAM, `foonlock --mock` takes the password
 `password`, and `--unlock-after SECS` unlocks by itself.
+
+### Suspend
+
+A screen keeps its last frame while suspended and shows it again on
+resume, so `foonlock` makes sure that frame is black:
+
+- While locked it holds a logind sleep delay inhibitor. When logind
+  announces a suspend, every screen goes black and the inhibitor is
+  released once they show it (after at most 0.5 s).
+- Started for the suspend itself (`before_sleep_cmd`), it begins with
+  a second of black before the power-on, which is where the suspend
+  lands.
+- After resume the tube powers on again, as at the start.
+
+If closing the lid right after a resume does nothing, that is logind,
+not the locker: it ignores the lid for `HoldoffTimeoutSec` (30 s) after
+boot or resume, so that docking monitors are detected first, and only
+then checks the lid again. To shorten it:
+
+    sudo mkdir -p /etc/systemd/logind.conf.d
+    printf '[Login]\nHoldoffTimeoutSec=10s\n' | sudo tee /etc/systemd/logind.conf.d/holdoff.conf
+
+This takes effect after a reboot. Too short, and closing the lid while
+docked may suspend before the external monitors are back.
+
+### Idle
+
+After 25 s without input, the greeter and the locker go still: the
+cursor stops blinking, the flicker and rolling bar pause, and the
+screen is only redrawn when the clock ticks. Any key wakes them.
 
 ## License
 
