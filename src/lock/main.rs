@@ -31,7 +31,7 @@ use smithay_client_toolkit::{
         client::{
             Connection, QueueHandle,
             globals::registry_queue_init,
-            protocol::{wl_keyboard, wl_output, wl_seat, wl_shm, wl_surface},
+            protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
         },
     },
     registry::{ProvidesRegistryState, RegistryState},
@@ -39,6 +39,7 @@ use smithay_client_toolkit::{
     seat::{
         Capability, SeatHandler, SeatState,
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
+        pointer::{PointerEvent, PointerEventKind, PointerHandler},
     },
     session_lock::{SessionLock, SessionLockHandler, SessionLockState, SessionLockSurface, SessionLockSurfaceConfigure},
     shm::{
@@ -60,6 +61,9 @@ const FRAME: Duration = Duration::from_millis(33);
 const WARMUP: f32 = 1.0;
 /// How long to hold up a suspend for the screens to show black.
 const SLEEP_TIMEOUT: Duration = Duration::from_millis(500);
+/// About a second of frames for the afterglow of a screen the lock box
+/// left.
+const FADE_FRAMES: u8 = 30;
 /// Buffers per screen; with frame callbacks two are normally enough.
 const MAX_BUFFERS: usize = 3;
 
@@ -124,6 +128,9 @@ struct Screen {
     black: bool,
     /// A black frame reached the screen since the last suspend signal.
     black_shown: bool,
+    /// Frames left to draw after the prompt moved away, so its afterglow
+    /// fades out instead of freezing.
+    fading: u8,
 }
 
 struct App {
@@ -138,6 +145,7 @@ struct App {
     lock_state: SessionLockState,
     pool: SlotPool,
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    pointer: Option<wl_pointer::WlPointer>,
 
     lock: Option<SessionLock>,
     locked: bool,
@@ -195,6 +203,7 @@ fn run() -> Result<(), String> {
         seat: SeatState::new(&globals, &qh),
         lock_state: SessionLockState::new(&globals, &qh),
         keyboard: None,
+        pointer: None,
         lock: None,
         locked: false,
         screens: Vec::new(),
@@ -271,6 +280,7 @@ impl App {
             prompt: false,
             black: false,
             black_shown: false,
+            fading: 0,
         });
     }
 
@@ -278,24 +288,35 @@ impl App {
         self.outputs.info(output).and_then(|i| i.name).unwrap_or_default()
     }
 
-    /// The configured output gets the lock box, else the first one.
+    /// Until the pointer shows up on a screen, the configured output gets
+    /// the lock box, else the first one.
     fn pick_prompt(&mut self) {
-        let names: Vec<String> = self.screens.iter().map(|s| self.output_name(&s.output)).collect();
         let want = self.display.output.as_deref();
-        let i = want.and_then(|w| names.iter().position(|n| n == w)).unwrap_or(0);
+        let i = want.and_then(|w| self.screens.iter().position(|s| self.output_name(&s.output) == w)).unwrap_or(0);
+        self.set_prompt(i);
+    }
+
+    /// Moves the lock box to screen `i`; the others show an empty tube.
+    fn set_prompt(&mut self, i: usize) {
+        if i >= self.screens.len() {
+            return;
+        }
         for (j, s) in self.screens.iter_mut().enumerate() {
-            if s.prompt != (i == j) {
-                s.prompt = i == j;
+            if s.prompt && j != i {
+                s.prompt = false;
                 s.settled = false;
+                s.fading = FADE_FRAMES;
                 s.bg = None;
             }
         }
-        if let Some(name) = names.get(i) {
-            self.ui.set_line(&name.to_uppercase());
-        }
-        if let Some(s) = self.screens.get_mut(i) {
+        let name = self.output_name(&self.screens[i].output);
+        let s = &mut self.screens[i];
+        if !s.prompt {
+            s.prompt = true;
+            s.settled = false;
             load_background(s, &self.display);
         }
+        self.ui.set_line(&name.to_uppercase());
     }
 
     fn screen_index(&self, surface: &wl_surface::WlSurface) -> Option<usize> {
@@ -418,7 +439,8 @@ impl App {
         {
             self.idle.drawn(second);
         }
-        s.settled = !s.prompt && collapse == 0.0;
+        s.fading = s.fading.saturating_sub(1);
+        s.settled = !s.prompt && collapse == 0.0 && s.fading == 0;
         s.black = collapse >= 1.0;
     }
 
@@ -571,6 +593,12 @@ impl SeatHandler for App {
     fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
 
     fn new_capability(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat, capability: Capability) {
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            match self.seat.get_pointer(qh, &seat) {
+                Ok(p) => self.pointer = Some(p),
+                Err(e) => eprintln!("foonlock: pointer: {e}"),
+            }
+        }
         if capability == Capability::Keyboard && self.keyboard.is_none() {
             let repeat = Box::new(|app: &mut App, _: &wl_keyboard::WlKeyboard, ev: KeyEvent| {
                 if let Some(k) = keys::map(&ev) {
@@ -589,6 +617,11 @@ impl SeatHandler for App {
             && let Some(kb) = self.keyboard.take()
         {
             kb.release();
+        }
+        if capability == Capability::Pointer
+            && let Some(p) = self.pointer.take()
+        {
+            p.release();
         }
     }
 
@@ -630,6 +663,24 @@ impl KeyboardHandler for App {
         _: RawModifiers,
         _: u32,
     ) {
+    }
+}
+
+impl PointerHandler for App {
+    /// The lock box follows the pointer to whichever screen it is on, and
+    /// using the pointer wakes the screen like a key.
+    fn pointer_frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_pointer::WlPointer, events: &[PointerEvent]) {
+        for ev in events {
+            if matches!(ev.kind, PointerEventKind::Leave { .. }) {
+                continue;
+            }
+            self.idle.input();
+            if let Some(i) = self.screen_index(&ev.surface)
+                && !self.screens[i].prompt
+            {
+                self.set_prompt(i);
+            }
+        }
     }
 }
 

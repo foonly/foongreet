@@ -98,6 +98,11 @@ Then start it from hypridle (`~/.config/hypr/hypridle.conf`):
 `inhibit_sleep = 3` makes hypridle hold off a suspend until the session
 is actually locked (it disables `on_lock_cmd` and `on_unlock_cmd`).
 
+With several screens, the lock box goes to the one the mouse is on
+(at first the `output` from the config) and the others show an empty
+tube; moving the mouse to another screen takes the box along. Portrait
+screens work too.
+
 `foonlock` refuses to start without `/etc/pam.d/foonlock`, as PAM's
 fallback would deny every password and the session could not be
 unlocked. If it ever dies while locked, the compositor keeps the session

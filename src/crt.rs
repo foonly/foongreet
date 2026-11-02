@@ -120,6 +120,10 @@ const DECAY_FRAME: f32 = 1.0 / 30.0;
 
 /// Low-res target height; the scale factor is picked to land near it.
 const TARGET_LINES: usize = 480;
+/// Least low-res width: 60 columns of an 8 px font, room for the login
+/// and lock boxes. Only narrow (portrait) screens get a smaller scale for
+/// it; landscape ones are wide enough at the target height.
+const MIN_WIDTH: usize = 480;
 /// Render threads. Each one past the first mostly adds overhead (waking
 /// and spinning) rather than speed, as frames are cheap: per 2560x1440
 /// frame, 9.0 ms of CPU on one thread, 9.4 ms on two (5.7 ms wall), 13 ms
@@ -164,7 +168,10 @@ pub fn init_threads() {
 
 impl Crt {
     pub fn new(ow: usize, oh: usize, phosphor: Phosphor) -> Crt {
-        let scale = ((oh as f32 / TARGET_LINES as f32).round() as usize).max(1);
+        let mut scale = ((oh as f32 / TARGET_LINES as f32).round() as usize).max(1);
+        while scale > 1 && ow / scale < MIN_WIDTH {
+            scale -= 1;
+        }
         let (lw, lh) = (ow / scale, oh / scale);
         let n = lw * lh;
         Crt {
