@@ -7,7 +7,9 @@ mod ui;
 
 use foongreet::{
     background, config, crt, font,
+    crt::{Crt, Rotation},
     idle::Idle,
+    key::Key,
     output,
     output::Output,
     tube::{Frame, Tube},
@@ -110,7 +112,7 @@ fn open_output(args: &Args, display: &config::Display) -> Result<Box<dyn Output>
     if !display.fbdev {
         // Other screens: an empty tube, just the glass glow and vignette.
         let mut blank = |w, h, buf: &mut [u32], stride| {
-            let mut crt = crt::Crt::new(w, h, display.phosphor);
+            let mut crt = Crt::new(w, h, display.phosphor);
             let lum = vec![0; crt.lw * crt.lh];
             crt.render(&lum, 0.0, 0.0, buf, stride);
         };
@@ -168,14 +170,20 @@ fn run() -> Result<(), String> {
     let mut out = open_output(&args, &config.display)?;
     warnings.extend(out.warning().map(|w| (w.clone(), w)));
 
+    // The screen and rotation picked with F3/F4 last time these screens
+    // were connected.
+    let screens = out.screens();
+    let ids: Vec<String> = screens.iter().map(|s| s.id.clone()).collect();
+    if let Some(i) = state.screen(&ids).and_then(|id| ids.iter().position(|x| x == id)) {
+        out.select(i);
+    }
+    let mut rotation = ids.get(out.current()).map_or(Rotation::R0, |id| state.rotation(id));
+
     let (w, h) = out.size();
-    let mut crt = crt::Crt::new(w, h, config.display.phosphor);
-    let bg = config.display.background.as_ref().and_then(|path| {
-        background::load(path, crt.lw, crt.lh, config.display.background_dim)
-            .map_err(|e| warnings.push((e, "BACKGROUND NOT LOADED".into())))
-            .ok()
-    });
+    let mut crt = Crt::rotated(w, h, config.display.phosphor, rotation);
+    let bg = load_background(&config.display, &crt).map_err(|e| warnings.push((e, "BACKGROUND NOT LOADED".into()))).ok().flatten();
     let mut ui = ui::Ui::new(font, bg, crt.lw, crt.lh, sessions, config.login.default_user.clone(), state, power, args.demo);
+    ui.can_switch = screens.iter().filter(|s| s.usable).count() > 1;
     for (detail, _) in &warnings {
         eprintln!("foongreet: {detail}");
     }
@@ -220,8 +228,38 @@ fn run() -> Result<(), String> {
         };
         if !tube.powering_off() {
             for k in keys {
-                ui.key(k, &auth);
                 idle.input();
+                let moved = match k {
+                    Key::F3 => {
+                        let cur = out.current();
+                        (1..ids.len()).any(|step| out.select((cur + step) % ids.len()))
+                    }
+                    Key::F4 => true,
+                    _ => {
+                        ui.key(k, &auth);
+                        continue;
+                    }
+                };
+                if !moved {
+                    continue;
+                }
+                let id = ids.get(out.current());
+                let state = ui.state_mut();
+                match (k, id) {
+                    (Key::F3, Some(id)) => {
+                        state.set_screen(&ids, id);
+                        rotation = state.rotation(id);
+                    }
+                    (_, Some(id)) => {
+                        rotation = rotation.next();
+                        state.set_rotation(id, rotation);
+                    }
+                    _ => rotation = rotation.next(),
+                }
+                let (w, h) = out.size();
+                crt = Crt::rotated(w, h, config.display.phosphor, rotation);
+                lum = vec![0; crt.lw * crt.lh];
+                ui.resize(crt.lw, crt.lh, load_background(&config.display, &crt).ok().flatten());
             }
             ui.tick();
             while let Ok(resp) = auth.rx.try_recv() {
@@ -285,6 +323,11 @@ fn run() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The background image at the CRT's low-res size, if one is configured.
+fn load_background(display: &config::Display, crt: &Crt) -> Result<Option<Vec<u8>>, String> {
+    display.background.as_ref().map(|path| background::load(path, crt.lw, crt.lh, display.background_dim)).transpose()
 }
 
 fn main() -> ExitCode {

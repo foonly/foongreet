@@ -178,12 +178,16 @@ fn decode(b: &[u8]) -> (Vec<Key>, usize) {
             [0x1b, b'[', b'C', ..] => (Some(Key::Right), 3),
             [0x1b, b'[', b'D', ..] => (Some(Key::Left), 3),
             [0x1b, b'[', b'Z', ..] => (Some(Key::BackTab), 3),
-            // F1/F2: Linux console (ESC [ [ A), xterm (ESC O P), vt220 (ESC [ 11 ~).
+            // F1-F4: Linux console (ESC [ [ A), xterm (ESC O P), vt220 (ESC [ 11 ~).
             [0x1b, b'[', b'[', b'A', ..] | [0x1b, b'O', b'P', ..] => (Some(Key::F1), if rest[1] == b'O' { 3 } else { 4 }),
             [0x1b, b'[', b'[', b'B', ..] | [0x1b, b'O', b'Q', ..] => (Some(Key::F2), if rest[1] == b'O' { 3 } else { 4 }),
+            [0x1b, b'[', b'[', b'C', ..] | [0x1b, b'O', b'R', ..] => (Some(Key::F3), if rest[1] == b'O' { 3 } else { 4 }),
+            [0x1b, b'[', b'[', b'D', ..] | [0x1b, b'O', b'S', ..] => (Some(Key::F4), if rest[1] == b'O' { 3 } else { 4 }),
             [0x1b, b'[', b'1', b'1', b'~', ..] => (Some(Key::F1), 5),
             [0x1b, b'[', b'1', b'2', b'~', ..] => (Some(Key::F2), 5),
-            // Other console F-keys: ESC [ [ C..E
+            [0x1b, b'[', b'1', b'3', b'~', ..] => (Some(Key::F3), 5),
+            [0x1b, b'[', b'1', b'4', b'~', ..] => (Some(Key::F4), 5),
+            // F5 on the console: ESC [ [ E
             [0x1b, b'[', b'[', _, ..] => (None, 4),
             [0x1b, b'O', _, ..] => (None, 3),
             // Other CSI sequences (F6+, Home, Del...): skip to the final byte.
@@ -246,8 +250,14 @@ mod tests {
         for seq in [&b"\x1b[[B"[..], b"\x1bOQ", b"\x1b[12~"] {
             assert_eq!(decode(seq), (vec![Key::F2], seq.len()));
         }
+        for seq in [&b"\x1b[[C"[..], b"\x1bOR", b"\x1b[13~"] {
+            assert_eq!(decode(seq), (vec![Key::F3], seq.len()));
+        }
+        for seq in [&b"\x1b[[D"[..], b"\x1bOS", b"\x1b[14~"] {
+            assert_eq!(decode(seq), (vec![Key::F4], seq.len()));
+        }
         // Other F-keys are swallowed, not typed as text.
-        assert_eq!(decode(b"\x1b[[Cx"), (vec![Key::Char('x')], 5));
+        assert_eq!(decode(b"\x1b[[Ex"), (vec![Key::Char('x')], 5));
         assert_eq!(decode(b"\x1b[15~y"), (vec![Key::Char('y')], 6));
     }
 

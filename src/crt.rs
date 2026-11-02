@@ -39,6 +39,67 @@ impl Phosphor {
         }
     }
 }
+/// How the picture is turned on the screen, clockwise, for monitors
+/// standing on their side. Screen pixels are what the output shows; view
+/// pixels are those of the upright picture.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub enum Rotation {
+    #[default]
+    R0,
+    R90,
+    R180,
+    R270,
+}
+
+impl Rotation {
+    /// The next quarter turn clockwise.
+    pub fn next(self) -> Rotation {
+        match self {
+            Rotation::R0 => Rotation::R90,
+            Rotation::R90 => Rotation::R180,
+            Rotation::R180 => Rotation::R270,
+            Rotation::R270 => Rotation::R0,
+        }
+    }
+
+    pub fn degrees(self) -> u16 {
+        match self {
+            Rotation::R0 => 0,
+            Rotation::R90 => 90,
+            Rotation::R180 => 180,
+            Rotation::R270 => 270,
+        }
+    }
+
+    pub fn from_degrees(d: u16) -> Option<Rotation> {
+        [Rotation::R0, Rotation::R90, Rotation::R180, Rotation::R270].into_iter().find(|r| r.degrees() == d)
+    }
+
+    fn quarter(self) -> bool {
+        matches!(self, Rotation::R90 | Rotation::R270)
+    }
+
+    /// The view pixel shown at screen pixel (x, y) of a `w`x`h` screen.
+    fn to_view(self, x: usize, y: usize, w: usize, h: usize) -> (usize, usize) {
+        match self {
+            Rotation::R0 => (x, y),
+            Rotation::R90 => (y, w - 1 - x),
+            Rotation::R180 => (w - 1 - x, h - 1 - y),
+            Rotation::R270 => (h - 1 - y, x),
+        }
+    }
+
+    /// The screen pixel showing view pixel (x, y); inverse of `to_view`.
+    fn to_screen(self, x: usize, y: usize, w: usize, h: usize) -> (usize, usize) {
+        match self {
+            Rotation::R0 => (x, y),
+            Rotation::R90 => (w - 1 - y, x),
+            Rotation::R180 => (w - 1 - x, h - 1 - y),
+            Rotation::R270 => (y, h - 1 - x),
+        }
+    }
+}
+
 /// Glow strength (of 256) and blur radius in low-res pixels.
 const GLOW: u32 = 170;
 const GLOW_RADIUS: usize = 3;
@@ -94,7 +155,8 @@ pub struct Crt {
     pub lh: usize,
     ow: usize,
     oh: usize,
-    /// One entry per output pixel.
+    rotation: Rotation,
+    /// One entry per output pixel, in screen order.
     map: Map,
     phos: Vec<u16>,
     sharp: Vec<u8>,
@@ -168,18 +230,37 @@ pub fn init_threads() {
 
 impl Crt {
     pub fn new(ow: usize, oh: usize, phosphor: Phosphor) -> Crt {
-        let mut scale = ((oh as f32 / TARGET_LINES as f32).round() as usize).max(1);
-        while scale > 1 && ow / scale < MIN_WIDTH {
+        Crt::rotated(ow, oh, phosphor, Rotation::R0)
+    }
+
+    /// A `ow`x`oh` output showing the picture turned by `rotation`; `lw`
+    /// and `lh` are those of the upright picture.
+    pub fn rotated(ow: usize, oh: usize, phosphor: Phosphor, rotation: Rotation) -> Crt {
+        let (vw, vh) = if rotation.quarter() { (oh, ow) } else { (ow, oh) };
+        let mut scale = ((vh as f32 / TARGET_LINES as f32).round() as usize).max(1);
+        while scale > 1 && vw / scale < MIN_WIDTH {
             scale -= 1;
         }
-        let (lw, lh) = (ow / scale, oh / scale);
+        let (lw, lh) = (vw / scale, vh / scale);
         let n = lw * lh;
+        let view = build_map(vw, vh, lw, lh, scale);
+        let samples = if rotation == Rotation::R0 {
+            view
+        } else {
+            (0..ow * oh)
+                .map(|i| {
+                    let (x, y) = rotation.to_view(i % ow, i / ow, ow, oh);
+                    view[y * vw + x]
+                })
+                .collect()
+        };
         Crt {
             lw,
             lh,
             ow,
             oh,
-            map: Map::new(build_map(ow, oh, lw, lh, scale)),
+            rotation,
+            map: Map::new(samples),
             phos: vec![0; n],
             sharp: vec![0; n],
             glow: vec![0; n],
@@ -250,23 +331,22 @@ impl Crt {
         // The squashed beam glows hot regardless of the picture.
         let flash = ((1.0 - sy) * 200.0 * fade) as u32;
 
-        let (ow, oh) = (self.ow, self.oh);
+        let (ow, oh, rot) = (self.ow, self.oh, self.rotation);
+        // The collapse squashes the upright picture, not the screen.
+        let (vw, vh) = if rot.quarter() { (oh as f32, ow as f32) } else { (ow as f32, oh as f32) };
         let (map, pairs, pal) = (&self.map, &self.pairs, &self.palette);
         out.par_chunks_mut(stride).take(oh).enumerate().for_each(|(y, line)| {
             let line = &mut line[..ow];
             if collapse > 0.0 {
-                let ys = oh as f32 / 2.0 + (y as f32 - oh as f32 / 2.0) / sy;
-                if ys < 0.0 || ys >= oh as f32 {
-                    line.fill(0);
-                    return;
-                }
-                let row = ys as usize * ow;
                 for (x, px) in line.iter_mut().enumerate() {
-                    let xs = ow as f32 / 2.0 + (x as f32 - ow as f32 / 2.0) / sx;
-                    *px = if xs < 0.0 || xs >= ow as f32 {
+                    let (vx, vy) = rot.to_view(x, y, ow, oh);
+                    let xs = vw / 2.0 + (vx as f32 - vw / 2.0) / sx;
+                    let ys = vh / 2.0 + (vy as f32 - vh / 2.0) / sy;
+                    *px = if xs < 0.0 || xs >= vw || ys < 0.0 || ys >= vh {
                         0
                     } else {
-                        let m = map.get(row + xs as usize);
+                        let (x, y) = rot.to_screen(xs as usize, ys as usize, ow, oh);
+                        let m = map.get(y * ow + x);
                         let v = (shade(m, pairs) * boost >> 8) + (flash * m.glow as u32 / 255);
                         pal[v.min(255) as u8 as usize]
                     };
@@ -476,4 +556,34 @@ fn palette(phosphor: Phosphor) -> [u32; 256] {
         *p = c[0] << 16 | c[1] << 8 | c[2];
     }
     pal
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotation_round_trip() {
+        let (w, h) = (5, 3);
+        for rot in [Rotation::R0, Rotation::R90, Rotation::R180, Rotation::R270] {
+            let (vw, vh) = if rot.quarter() { (h, w) } else { (w, h) };
+            for y in 0..h {
+                for x in 0..w {
+                    let (vx, vy) = rot.to_view(x, y, w, h);
+                    assert!(vx < vw && vy < vh, "{rot:?}");
+                    assert_eq!(rot.to_screen(vx, vy, w, h), (x, y), "{rot:?}");
+                }
+            }
+        }
+        // A quarter turn clockwise puts the picture's top left at the
+        // screen's top right.
+        assert_eq!(Rotation::R90.to_screen(0, 0, w, h), (w - 1, 0));
+        assert_eq!(Rotation::R0.next().next().next().next(), Rotation::R0);
+    }
+
+    #[test]
+    fn rotated_size() {
+        let crt = Crt::rotated(1440, 960, Phosphor::Amber, Rotation::R90);
+        assert!(crt.lh > crt.lw, "{}x{}", crt.lw, crt.lh);
+    }
 }

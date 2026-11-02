@@ -75,6 +75,8 @@ pub struct Ui {
     /// Power command running; the system should be going down.
     halting: Option<Action>,
 
+    /// Whether F3 can move the login to another screen (shown in the footer).
+    pub can_switch: bool,
     /// Whether the cursor blinks; off, it is hidden and the box static.
     pub blink: bool,
     /// Session started; the greeter should exit.
@@ -123,10 +125,21 @@ impl Ui {
             power,
             confirm: None,
             halting: None,
+            can_switch: false,
             blink: true,
             done: false,
             interrupted: false,
         }
+    }
+
+    /// For another screen or rotation: the new low-res size and the
+    /// background scaled to it.
+    pub fn resize(&mut self, w: usize, h: usize, bg: Option<Vec<u8>>) {
+        (self.w, self.h, self.bg) = (w, h, bg);
+    }
+
+    pub fn state_mut(&mut self) -> &mut State {
+        &mut self.state
     }
 
     /// Shows a startup problem (bad config, missing image) in the status line.
@@ -422,7 +435,9 @@ impl Ui {
         let status: String = status.chars().take(BOX_COLS - 6).collect();
         c.text((bc + 4) * cw, (br + 6) * ch, &status, level);
 
-        let footer = ["[TAB] FIELD   [</>] SESSION   [ENTER] LOGIN   [ESC] CLEAR", "[F1] POWER OFF   [F2] REBOOT"];
+        let screen = if self.can_switch { "[F3] SCREEN   " } else { "" };
+        let power = format!("[F1] POWER OFF   [F2] REBOOT   {screen}[F4] ROTATE");
+        let footer = ["[TAB] FIELD   [</>] SESSION   [ENTER] LOGIN   [ESC] CLEAR", power.as_str()];
         for (i, line) in footer.iter().enumerate() {
             c.text(cols.saturating_sub(line.len()) / 2 * cw, (rows - 3 + i) * ch, line, DIM);
         }

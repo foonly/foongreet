@@ -1,6 +1,6 @@
 //! Legacy /dev/fb0 output. Only works while no DRM master is active.
 
-use super::Output;
+use super::{Output, Screen};
 use std::{fs, fs::OpenOptions, io, os::fd::AsRawFd};
 
 pub struct Fbdev {
@@ -60,6 +60,11 @@ impl Output for Fbdev {
         let buf = unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len / 4) };
         draw(buf, self.stride);
         Ok(())
+    }
+
+    /// One screen, so its rotation can be remembered.
+    fn screens(&self) -> Vec<Screen> {
+        vec![Screen { id: "fb0".into(), usable: true }]
     }
 }
 

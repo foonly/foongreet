@@ -65,9 +65,15 @@ phosphor color, background image, font, login screen, `/dev/fb0` mode,
 default user, cache directory, power commands and extra sessions.
 
 With several screens, the login goes on one (`output`, default the first
-connected) and the others show an empty tube. `foongreet --list-outputs`
-shows the screen names and which one gets the login; it works while your
-compositor is running.
+connected) and the others show an empty tube. A laptop panel under a
+closed lid is skipped and turned off. F3 moves the login to the next
+screen and F4 turns it a quarter turn, for monitors standing on their
+side. Both are remembered at the next login: the screen for that set of
+monitors, the rotation for that monitor (recognized by its EDID, so a
+dock renumbering connectors doesn't matter). A remembered screen wins
+over `output`. `foongreet --list-outputs` shows the screen names and
+which one gets the login by default; it works while your compositor is
+running.
 
 A broken config does not stop the greeter: it starts with the defaults,
 shows `CONFIG ERROR, USING DEFAULTS`, and writes the details to stderr.

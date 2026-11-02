@@ -82,6 +82,8 @@ impl Preview {
                 K::Escape => Some(Key::Esc),
                 K::F1 => Some(Key::F1),
                 K::F2 => Some(Key::F2),
+                K::F3 => Some(Key::F3),
+                K::F4 => Some(Key::F4),
                 _ => None,
             });
         }
