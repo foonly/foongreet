@@ -3,11 +3,11 @@
 #   make
 #   sudo make install
 #
-# The screen locker builds and installs separately (it needs libpam and
-# libxkbcommon):
+# That builds and installs both the greeter and the screen locker. Either
+# can be done on its own (the locker needs libpam and libxkbcommon):
 #
-#   make lock
-#   sudo make install-lock
+#   make greeter && sudo make install-greeter
+#   make lock    && sudo make install-lock
 #
 # install never builds, so target/ is not left owned by root.
 
@@ -23,12 +23,12 @@ CONFIG := $(DESTDIR)$(SYSCONFDIR)/foongreet/config.toml
 LOCK_BIN := target/release/foonlock
 PAM_FILE := $(DESTDIR)$(SYSCONFDIR)/pam.d/foonlock
 
-.PHONY: all build lock test preview screenshots install install-lock uninstall clean
+.PHONY: all greeter lock test preview screenshots install install-greeter install-lock uninstall clean
 
-all: build
+all: greeter lock
 
-build:
-	cargo build --release
+greeter:
+	cargo build --release --bin foongreet
 
 lock:
 	cargo build --release --features lock --bin foonlock
@@ -41,13 +41,15 @@ preview:
 	cargo run --release --features preview -- --preview 1600x900
 
 # Regenerates the README screenshots with made-up machine details.
-screenshots: build
+screenshots: greeter
 	$(BIN) --snapshot docs/amber.png --preview 1600x900 --config /dev/null --demo
 	printf '[display]\nphosphor = "green"\n' > target/green.toml
 	$(BIN) --snapshot docs/green.png --preview 1600x900 --config target/green.toml --demo
 
-install:
-	@test -x $(BIN) || { echo "$(BIN) not found; run 'make' as your user first"; exit 1; }
+install: install-greeter install-lock
+
+install-greeter:
+	@test -x $(BIN) || { echo "$(BIN) not found; run 'make greeter' as your user first"; exit 1; }
 	install -Dm755 $(BIN) $(DESTDIR)$(BINDIR)/foongreet
 	@# Never overwrite an existing config.
 	@if [ -e $(CONFIG) ]; then \

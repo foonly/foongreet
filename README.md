@@ -10,13 +10,17 @@ stack.
 ## Build and install
 
     make                 # build as your user
-    sudo make install    # binary, default config, cache directory
+    sudo make install    # greeter and screen locker
 
-`make install` puts the binary in `/usr/local/bin`, installs
+This builds and installs both the greeter and the
+[screen locker](#screen-locker). To do just the greeter, use
+`make greeter` and `sudo make install-greeter`.
+
+`make install-greeter` puts the binary in `/usr/local/bin`, installs
 `config.example.toml` as `/etc/foongreet/config.toml` unless one already
 exists, and creates `/var/cache/foongreet` for the `greeter` user.
 `PREFIX`, `DESTDIR` and `GREETER_USER` can be overridden as usual.
-`sudo make uninstall` removes the binary but keeps the config and cache.
+`sudo make uninstall` removes the binaries but keeps the config and cache.
 
 Other targets: `make test`, `make preview` (desktop window with a fake
 greetd), `make screenshots` (regenerates the images above).
@@ -87,8 +91,9 @@ The command line only has testing flags; see `foongreet --help`.
 `foonlock` locks a Wayland session with the same look, through
 ext-session-lock-v1 (Hyprland, sway, niri, river, KWin and others).
 It checks the password with PAM and reads the `[display]` settings from
-the same config file. Build and install it separately; it needs libpam,
-libxkbcommon and libsystemd:
+the same config file. `make` and `sudo make install` include it; to
+build and install only the locker (it needs libpam, libxkbcommon and
+libsystemd):
 
     make lock
     sudo make install-lock    # binary and /etc/pam.d/foonlock
