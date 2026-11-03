@@ -15,6 +15,10 @@ name = "foonlock"
 path = "src/lock/main.rs"
 required-features = ["lock"]
 
+[[bin]]
+name = "foonpaper"
+path = "src/paper/main.rs"
+
 [dependencies]
 drm = "0.15.0"
 flate2 = "1.1.10"

@@ -236,6 +236,16 @@ impl Crt {
     /// A `ow`x`oh` output showing the picture turned by `rotation`; `lw`
     /// and `lh` are those of the upright picture.
     pub fn rotated(ow: usize, oh: usize, phosphor: Phosphor, rotation: Rotation) -> Crt {
+        Crt::build(ow, oh, phosphor, rotation, false)
+    }
+
+    /// A flat screen: scanlines and glow, but no curvature, vignette or
+    /// rounded tube edge (for wallpapers).
+    pub fn flat(ow: usize, oh: usize, phosphor: Phosphor) -> Crt {
+        Crt::build(ow, oh, phosphor, Rotation::R0, true)
+    }
+
+    fn build(ow: usize, oh: usize, phosphor: Phosphor, rotation: Rotation, flat: bool) -> Crt {
         let (vw, vh) = if rotation.quarter() { (oh, ow) } else { (ow, oh) };
         let mut scale = ((vh as f32 / TARGET_LINES as f32).round() as usize).max(1);
         while scale > 1 && vw / scale < MIN_WIDTH {
@@ -243,7 +253,7 @@ impl Crt {
         }
         let (lw, lh) = (vw / scale, vh / scale);
         let n = lw * lh;
-        let view = build_map(vw, vh, lw, lh, scale);
+        let view = build_map(vw, vh, lw, lh, scale, flat);
         let samples = if rotation == Rotation::R0 {
             view
         } else {
@@ -422,15 +432,17 @@ fn pack_row(sharp: &[u8], glow: &[u8], pairs: &mut [u32]) {
     pairs[w - 1] = pack(sharp[w - 1], glow[w - 1], 0, 0);
 }
 
-fn build_map(ow: usize, oh: usize, lw: usize, lh: usize, scale: usize) -> Vec<Sample> {
+/// `flat` leaves out the curvature, vignette and tube edge.
+fn build_map(ow: usize, oh: usize, lw: usize, lh: usize, scale: usize, flat: bool) -> Vec<Sample> {
+    let (curve_x, curve_y) = if flat { (0.0, 0.0) } else { (CURVE_X, CURVE_Y) };
     let aspect = ow as f32 / oh as f32;
     let mut map = vec![Sample::default(); ow * oh];
     map.par_chunks_mut(ow).enumerate().for_each(|(y, row)| {
         let v = (y as f32 + 0.5) / oh as f32 * 2.0 - 1.0;
         for (x, m) in row.iter_mut().enumerate() {
             let u = (x as f32 + 0.5) / ow as f32 * 2.0 - 1.0;
-            let cu = u * (1.0 + CURVE_X * v * v);
-            let cv = v * (1.0 + CURVE_Y * u * u);
+            let cu = u * (1.0 + curve_x * v * v);
+            let cv = v * (1.0 + curve_y * u * u);
             if cu.abs() >= 1.0 || cv.abs() >= 1.0 {
                 continue;
             }
@@ -456,7 +468,7 @@ fn build_map(ow: usize, oh: usize, lw: usize, lh: usize, scale: usize) -> Vec<Sa
             } else {
                 ex.min(ey)
             };
-            let vig = vig * smoothstep(0.0, 0.006, edge);
+            let vig = if flat { 1.0 } else { vig * smoothstep(0.0, 0.006, edge) };
 
             // Blend between the two low-res pixel centers around lx.
             let px = (lx - 0.5).clamp(0.0, (lw - 1) as f32);

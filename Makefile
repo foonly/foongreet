@@ -21,17 +21,22 @@ DESTDIR      ?=
 BIN    := target/release/foongreet
 CONFIG := $(DESTDIR)$(SYSCONFDIR)/foongreet/config.toml
 LOCK_BIN := target/release/foonlock
+PAPER_BIN := target/release/foonpaper
 PAM_FILE := $(DESTDIR)$(SYSCONFDIR)/pam.d/foonlock
 
-.PHONY: all greeter lock test preview screenshots install install-greeter install-lock uninstall clean
+.PHONY: all greeter lock paper test preview screenshots install install-greeter install-lock install-paper uninstall clean
 
-all: greeter lock
+all: greeter lock paper
 
 greeter:
 	cargo build --release --bin foongreet
 
 lock:
 	cargo build --release --features lock --bin foonlock
+
+# Wallpaper renderer for the desktop.
+paper:
+	cargo build --release --bin foonpaper
 
 test:
 	cargo test --release --features lock
@@ -46,7 +51,7 @@ screenshots: greeter
 	printf '[display]\nphosphor = "green"\n' > target/green.toml
 	$(BIN) --snapshot docs/green.png --preview 1600x900 --config target/green.toml --demo
 
-install: install-greeter install-lock
+install: install-greeter install-lock install-paper
 
 install-greeter:
 	@test -x $(BIN) || { echo "$(BIN) not found; run 'make greeter' as your user first"; exit 1; }
@@ -79,9 +84,13 @@ install-lock:
 	@echo "In ~/.config/hypr/hypridle.conf, under general:"
 	@echo "  lock_cmd = pidof foonlock || $(BINDIR)/foonlock"
 
+install-paper:
+	@test -x $(PAPER_BIN) || { echo "$(PAPER_BIN) not found; run 'make paper' as your user first"; exit 1; }
+	install -Dm755 $(PAPER_BIN) $(DESTDIR)$(BINDIR)/foonpaper
+
 # Leaves the config and cache in place.
 uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/foongreet $(DESTDIR)$(BINDIR)/foonlock $(PAM_FILE)
+	rm -f $(DESTDIR)$(BINDIR)/foongreet $(DESTDIR)$(BINDIR)/foonlock $(DESTDIR)$(BINDIR)/foonpaper $(PAM_FILE)
 	@echo "kept $(CONFIG) and $(DESTDIR)$(CACHEDIR); remove them by hand if wanted"
 
 clean:

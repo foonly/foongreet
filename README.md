@@ -154,6 +154,18 @@ After 25 s without input, the greeter and the locker go still: the
 cursor stops blinking, the flicker and rolling bar pause, and the
 screen is only redrawn when the clock ticks. Any key wakes them.
 
+## Wallpaper
+
+`foonpaper` turns an image into a matching desktop wallpaper: low
+resolution, one phosphor color, scanlines and glow, but on a flat screen
+without the tube's curvature:
+
+    foonpaper --size 2560x1440 --phosphor amber in.png out.png
+
+Give portrait screens as `1440x2560`; `--dim` sets the brightness
+(default 0.5). It is built and installed with the rest, or alone with
+`make paper` and `sudo make install-paper`.
+
 ## License
 
 Copyright (C) 2026 Niklas Schönberg
