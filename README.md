@@ -163,7 +163,8 @@ without the tube's curvature:
     foonpaper --size 2560x1440 --phosphor amber in.png out.png
 
 Give portrait screens as `1440x2560`; `--dim` sets the brightness
-(default 0.5). It is built and installed with the rest, or alone with
+(default 0.5). `--gradient "#0d0820,#ff3d9a,#ffb86c"` maps the image
+through colors from dark to bright instead of a phosphor. It is built and installed with the rest, or alone with
 `make paper` and `sudo make install-paper`.
 
 ## License

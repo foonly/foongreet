@@ -11,6 +11,8 @@ usage: foonpaper [options] IN.png OUT.png
   --size WxH         output size in pixels (default 1920x1080); give
                      portrait screens as e.g. 1440x2560
   --phosphor COLOR   amber or green (default amber)
+  --gradient LIST    colors from dark to bright instead of a phosphor,
+                     e.g. \"#0d0820,#ff3d9a,#ffb86c\"
   --dim N            image brightness, 0.0 to 1.0 (default 0.5)
 ";
 
@@ -19,13 +21,31 @@ struct Args {
     out: PathBuf,
     size: (usize, usize),
     phosphor: crt::Phosphor,
+    gradient: Option<Vec<[f32; 3]>>,
     dim: f32,
+}
+
+/// "#rrggbb,#rrggbb,..." as RGB stops.
+fn parse_gradient(list: &str) -> Result<Vec<[f32; 3]>, String> {
+    let stops = list
+        .split(',')
+        .map(|c| {
+            let hex = c.trim().trim_start_matches('#');
+            let v = u32::from_str_radix(hex, 16).ok().filter(|_| hex.len() == 6).ok_or(format!("--gradient: bad color {c}"))?;
+            Ok([(v >> 16) as f32 / 255.0, (v >> 8 & 0xff) as f32 / 255.0, (v & 0xff) as f32 / 255.0])
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if stops.len() < 2 {
+        return Err("--gradient: needs at least two colors".into());
+    }
+    Ok(stops)
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut files = Vec::new();
     let mut size = (1920, 1080);
     let mut phosphor = crt::Phosphor::Amber;
+    let mut gradient = None;
     let mut dim = 0.5;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -46,6 +66,7 @@ fn parse_args() -> Result<Args, String> {
                     p => return Err(format!("--phosphor: unknown color {p}")),
                 }
             }
+            "--gradient" => gradient = Some(parse_gradient(&val()?)?),
             "--dim" => dim = val()?.parse::<f32>().map_err(|_| "--dim: expected a number")?.clamp(0.0, 1.0),
             "-h" | "--help" => {
                 print!("{USAGE}");
@@ -56,7 +77,7 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     let [input, out]: [PathBuf; 2] = files.try_into().map_err(|_| format!("expected IN.png and OUT.png\n\n{USAGE}"))?;
-    Ok(Args { input, out, size, phosphor, dim })
+    Ok(Args { input, out, size, phosphor, gradient, dim })
 }
 
 fn run() -> Result<(), String> {
@@ -66,6 +87,9 @@ fn run() -> Result<(), String> {
     let mut crt = Crt::flat(w, h, args.phosphor);
     // A single frame: no flicker or rolling bar, and the noise stays put.
     crt.still = true;
+    if let Some(stops) = &args.gradient {
+        crt.set_palette(crt::gradient(stops));
+    }
     let lum = background::load(&args.input, crt.lw, crt.lh, args.dim)?;
     let mut px = vec![0u32; w * h];
     crt.render(&lum, 0.0, 0.0, &mut px, w);

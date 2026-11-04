@@ -285,6 +285,11 @@ impl Crt {
         }
     }
 
+    /// Colorizes through `palette` (from `gradient`) instead of the phosphor's.
+    pub fn set_palette(&mut self, palette: [u32; 256]) {
+        self.palette = palette;
+    }
+
     fn rand(&mut self) -> u32 {
         let mut x = self.rng;
         x ^= x << 13;
@@ -555,6 +560,23 @@ fn box_blur(src: &[u8], tmp: &mut [u16], dst: &mut [u8], pairs: &mut [u32], w: u
 }
 
 /// Dark lows, saturated mids, and a pale core where the phosphor saturates.
+/// A palette blending evenly spaced RGB `stops` (0..1 per channel), the
+/// first for black and the last for full brightness. Takes at least two.
+pub fn gradient(stops: &[[f32; 3]]) -> [u32; 256] {
+    assert!(stops.len() >= 2, "a gradient needs two stops");
+    let mut pal = [0u32; 256];
+    for (i, p) in pal.iter_mut().enumerate() {
+        let pos = i as f32 / 255.0 * (stops.len() - 1) as f32;
+        let k = (pos as usize).min(stops.len() - 2);
+        let f = pos - k as f32;
+        let c: Vec<u32> = (0..3)
+            .map(|j| ((stops[k][j] * (1.0 - f) + stops[k + 1][j] * f) * 255.0).round().clamp(0.0, 255.0) as u32)
+            .collect();
+        *p = c[0] << 16 | c[1] << 8 | c[2];
+    }
+    pal
+}
+
 fn palette(phosphor: Phosphor) -> [u32; 256] {
     let (base, hot) = phosphor.colors();
     let mut pal = [0u32; 256];
