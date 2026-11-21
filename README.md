@@ -33,7 +33,7 @@ greetd), `make screenshots` (regenerates the images above).
 
    `foongreet --snapshot out.png` renders offscreen instead; add `--demo`
    to swap your hostname, kernel, memory and clock for made-up values
-   (`make screenshots` uses both).
+   and hide the battery (`make screenshots` uses both).
 
 2. **Spare VT with the real display path**: switch to a free VT
    (Ctrl+Alt+F3), log in, and run:
@@ -86,6 +86,10 @@ run `foongreet --snapshot /tmp/x.png` against the config.
 
 The command line only has testing flags; see `foongreet --help`.
 
+On a laptop, the greeter and the locker show the battery charge under
+the clock (read every 15 s from `/sys/class/power_supply`), bright
+when it is below 15% and not charging.
+
 ## Screen locker
 
 `foonlock` locks a Wayland session with the same look, through
@@ -113,10 +117,6 @@ With several screens, the lock box goes to the one the mouse is on
 (at first the `output` from the config) and the others show an empty
 tube; moving the mouse to another screen takes the box along. Portrait
 screens work too.
-
-On a laptop, the charge of the battery shows under the clock (read
-every 15 s from `/sys/class/power_supply`), bright when it is below
-15% and not charging.
 
 `foonlock` refuses to start without `/etc/pam.d/foonlock`, as PAM's
 fallback would deny every password and the session could not be

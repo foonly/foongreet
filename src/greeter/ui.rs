@@ -10,6 +10,7 @@ use crate::{
     tty,
 };
 use foongreet::{
+    battery::Gauge,
     canvas,
     canvas::{BRIGHT, Canvas, DIM, NORMAL},
     font::Font,
@@ -74,6 +75,7 @@ pub struct Ui {
     confirm: Option<Action>,
     /// Power command running; the system should be going down.
     halting: Option<Action>,
+    battery: Gauge,
 
     /// Whether F3 can move the login to another screen (shown in the footer).
     pub can_switch: bool,
@@ -125,6 +127,7 @@ impl Ui {
             power,
             confirm: None,
             halting: None,
+            battery: Gauge::default(),
             can_switch: false,
             blink: true,
             done: false,
@@ -174,8 +177,10 @@ impl Ui {
         self.status_at = self.time();
     }
 
-    /// Per-frame housekeeping: checks on a running power command.
+    /// Per-frame housekeeping: checks on a running power command and
+    /// rereads the battery now and then.
     pub fn tick(&mut self) {
+        self.battery.poll(self.demo);
         if let Some(Err(e)) = self.power.poll() {
             self.halting = None;
             self.set_status(Status::Error(e.to_uppercase()));
@@ -356,8 +361,10 @@ impl Ui {
         let cols = self.w / cw;
         let rows = self.h / ch;
 
+        let typed = c.header(&self.header, t, self.demo);
+        self.battery.draw(&mut c);
         // Login box, appears once the header has finished typing.
-        if !c.header(&self.header, t, self.demo) {
+        if !typed {
             return;
         }
         let bc = (cols.saturating_sub(BOX_COLS)) / 2;

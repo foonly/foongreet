@@ -1,9 +1,52 @@
-//! The system battery charge, from /sys/class/power_supply. Batteries of
-//! peripherals (mice, headsets: `scope` is "Device") are left out.
+//! The system battery charge, from /sys/class/power_supply, shown under
+//! the clock. Batteries of peripherals (mice, headsets: `scope` is
+//! "Device") are left out.
 
-use std::{fs, path::Path};
+use crate::canvas::{BRIGHT, Canvas, NORMAL};
+use std::{
+    fs,
+    path::Path,
+    time::{Duration, Instant},
+};
 
 const SUPPLIES: &str = "/sys/class/power_supply";
+/// How often to read the charge.
+const EVERY: Duration = Duration::from_secs(15);
+/// Below this, while not charging, the charge is drawn bright.
+const LOW: u8 = 15;
+
+/// The charge as last read, for drawing under the clock.
+#[derive(Default)]
+pub struct Gauge {
+    /// None without a battery (or in the demo).
+    battery: Option<Battery>,
+    read_at: Option<Instant>,
+}
+
+impl Gauge {
+    /// Reads the charge again if it is time to. `demo` keeps it hidden,
+    /// as the demo shows made-up machine details.
+    pub fn poll(&mut self, demo: bool) {
+        if demo || self.read_at.is_some_and(|t| t.elapsed() < EVERY) {
+            return;
+        }
+        self.battery = read();
+        self.read_at = Some(Instant::now());
+    }
+
+    /// Draws the charge right-aligned under the clock.
+    pub fn draw(&self, c: &mut Canvas) {
+        let Some(b) = self.battery else { return };
+        let (text, level) = match b {
+            Battery { percent, charging: true } => (format!("CHARGING {percent}%"), NORMAL),
+            Battery { percent, .. } if percent < LOW => (format!("BATTERY LOW {percent}%"), BRIGHT),
+            Battery { percent, .. } => (format!("BATTERY {percent}%"), NORMAL),
+        };
+        let (cw, ch) = (c.font.width, c.font.height);
+        let cols = c.w / cw;
+        c.text(cols.saturating_sub(text.len() + 2) * cw, 2 * ch, &text, level);
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Battery {

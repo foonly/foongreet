@@ -3,21 +3,17 @@
 
 use crate::auth::{self, Auth, Event, Request};
 use foongreet::{
-    battery::{self, Battery},
+    battery::Gauge,
     canvas,
     canvas::{BRIGHT, Canvas, DIM, NORMAL},
     font::Font,
     key::Key,
 };
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const BOX_COLS: usize = 52;
 const BOX_ROWS: usize = 7;
 const LABEL_COLS: usize = 12;
-/// How often to read the battery charge.
-const BATTERY_EVERY: Duration = Duration::from_secs(15);
-/// Below this, while not charging, the charge is drawn bright.
-const BATTERY_LOW: u8 = 15;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
@@ -52,9 +48,7 @@ pub struct Ui {
     cancelled: bool,
     status: Status,
     status_at: f32,
-    /// None without a battery (or in the demo).
-    battery: Option<Battery>,
-    battery_read: Option<Instant>,
+    battery: Gauge,
 
     /// Whether the cursor blinks; off, it is hidden and the box static.
     pub blink: bool,
@@ -77,8 +71,7 @@ impl Ui {
             cancelled: false,
             status: Status::Ready,
             status_at: 0.0,
-            battery: None,
-            battery_read: None,
+            battery: Gauge::default(),
             blink: true,
             done: false,
         }
@@ -97,11 +90,7 @@ impl Ui {
 
     /// Reads the battery charge again if it is time to.
     pub fn poll_battery(&mut self) {
-        if self.demo || self.battery_read.is_some_and(|t| t.elapsed() < BATTERY_EVERY) {
-            return;
-        }
-        self.battery = battery::read();
-        self.battery_read = Some(Instant::now());
+        self.battery.poll(self.demo);
     }
 
     pub fn time(&self) -> f32 {
@@ -199,15 +188,7 @@ impl Ui {
         let rows = h / ch;
 
         let typed = c.header(&self.header, t, self.demo);
-        // Under the clock, right-aligned with it.
-        if let Some(b) = self.battery {
-            let (text, level) = match b {
-                Battery { percent, charging: true } => (format!("CHARGING {percent}%"), NORMAL),
-                Battery { percent, .. } if percent < BATTERY_LOW => (format!("BATTERY LOW {percent}%"), BRIGHT),
-                Battery { percent, .. } => (format!("BATTERY {percent}%"), NORMAL),
-            };
-            c.text(cols.saturating_sub(text.len() + 2) * cw, 2 * ch, &text, level);
-        }
+        self.battery.draw(&mut c);
         if !typed {
             return;
         }
