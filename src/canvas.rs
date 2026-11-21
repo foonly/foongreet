@@ -103,7 +103,13 @@ pub fn header_lines(demo: bool, line: &str) -> Vec<String> {
         (mem_kb, read("/proc/sys/kernel/osrelease"), read("/proc/sys/kernel/hostname"), line.to_string())
     };
     vec![
-        "FOONGREET TERMINAL SYSTEM  REV 0.1".into(),
+        concat!(
+            "FOONGREET TERMINAL SYSTEM  REV ",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            ".",
+            env!("CARGO_PKG_VERSION_MINOR")
+        )
+        .into(),
         "(C) 1986-2026 FOONLY MICROSYSTEMS".into(),
         String::new(),
         format!("MEMORY TEST ... {mem_kb}K OK"),
