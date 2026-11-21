@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0 (2026-11-21)
+
+#### Features
+
+- take the boot header's REV from the crate version (42094f5)
+- lock: show the battery charge on the lock screen (a4f59a9)
+
+#### Maintenance
+
+- add foonver config (479f9af)
+
+#### Misc
+
+- Let foonpaper map images through a color gradient (9ec843c)
+- Add foonpaper, a wallpaper renderer with a flat CRT look (e3e6696)
+
 ### v0.1.2 (2026-11-03)
 
 #### Misc
@@ -28,4 +44,3 @@
 - Add Makefile for building and installing (f5aba16)
 - Rename to Foonly Microsystems, add --demo and screenshots (fafe2b2)
 - Initial commit: CRT-style greetd greeter (6f02c29)
-
