@@ -2,6 +2,7 @@
 //! drawing on the luminance buffer, config, and display outputs.
 
 pub mod background;
+pub mod battery;
 pub mod canvas;
 pub mod config;
 pub mod crt;

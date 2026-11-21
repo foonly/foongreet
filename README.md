@@ -114,6 +114,10 @@ With several screens, the lock box goes to the one the mouse is on
 tube; moving the mouse to another screen takes the box along. Portrait
 screens work too.
 
+On a laptop, the charge of the battery shows under the clock (read
+every 15 s from `/sys/class/power_supply`), bright when it is below
+15% and not charging.
+
 `foonlock` refuses to start without `/etc/pam.d/foonlock`, as PAM's
 fallback would deny every password and the session could not be
 unlocked. If it ever dies while locked, the compositor keeps the session

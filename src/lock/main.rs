@@ -357,6 +357,7 @@ impl App {
                 logind.release();
             }
         }
+        self.ui.poll_battery();
         while let Ok(ev) = self.auth.rx.try_recv() {
             self.ui.event(ev);
             self.idle.input();
