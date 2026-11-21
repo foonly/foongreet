@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 (2026-11-21)
+
+#### Features
+
+- greeter: show the battery charge (cba2743)
+
 ## 0.2.0 (2026-11-21)
 
 #### Features
